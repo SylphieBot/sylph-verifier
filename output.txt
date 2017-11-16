@@ -1,0 +1,687 @@
+JHHPUN
+AssetService AssetService Tags 
+BlurEffect Blur Tags 
+CSGDictionaryService CSGDictionaryService Tags 
+Camera Camera Tags 
+Chat Chat Tags 
+CollectionService CollectionService Tags 
+ColorCorrectionEffect ColorCorrection Tags 
+ContextActionService ContextActionService Tags 
+CookiesService CookiesService Tags 
+Debris Debris Tags 
+Frame Background Tags 
+GamePassService GamePassService Tags 
+Geometry Geometry Tags 
+HttpService HttpService Tags 
+ImageLabel MainFrame Image rbxasset://textures/ui/btn_newWhiteGlow.png
+ImageLabel CommandContainer Image rbxasset://textures/whiteCircle.png
+ImageLabel MainFrame Tags 
+ImageLabel CommandContainer Tags 
+InsertService InsertService Tags 
+Instance FilteredSelection Tags 
+Instance FilteredSelection Tags 
+Instance FilteredSelection Tags 
+Instance FilteredSelection Tags 
+Instance FilteredSelection Tags 
+Instance FilteredSelection Tags 
+Lighting Lighting Tags 
+Lighting Lighting TimeOfDay 14:00:00
+LocalScript InitUI LinkedSource 
+LocalScript CameraScript LinkedSource 
+LocalScript SetDefaults LinkedSource 
+LocalScript CodeUpdater LinkedSource 
+LocalScript SetTextFromSettings LinkedSource 
+LocalScript HideIfNotInStudio LinkedSource 
+LocalScript InitUI ScriptGuid {4B6C0D4E-B61A-4CC0-A566-3587DA2C4B1E}
+LocalScript CameraScript ScriptGuid {209E2A0A-D4FB-4E6D-A761-C69E2BD66D69}
+LocalScript SetDefaults ScriptGuid {9F513E9E-F028-4B3B-A61C-D432B6CDC873}
+LocalScript CodeUpdater ScriptGuid {03A42A95-70CF-4193-82BF-AE95C70E07E0}
+LocalScript SetTextFromSettings ScriptGuid {A7FEBA31-955A-4D76-8D0B-CD614B27FA51}
+LocalScript HideIfNotInStudio ScriptGuid {1BC0BA61-C9D9-4612-8683-20673CD70772}
+LocalScript InitUI Source local StarterGui = game:GetService('StarterGui')
+
+-- Hide the default corescripts UI
+spawn(function () repeat wait() until pcall(function () StarterGui:SetCore("TopbarEnabled", false) end) end)
+
+LocalScript CameraScript Source workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
+workspace.CurrentCamera.CFrame = CFrame.new(1.33072925, 43.1494865, 85.3383026, 0.999124169, 0.00483945711, 0.0415647291, -0, 0.993290126, -0.115650557, -0.0418455154, 0.115549266, 0.992420018)
+
+LocalScript SetDefaults Source local UserInputService = game:GetService("UserInputService")
+UserInputService.ModalEnabled = true
+UserInputService.MouseIconEnabled = false
+
+LocalScript CodeUpdater Source local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local client_config = require(ReplicatedStorage:WaitForChild("client_config"))
+
+while true do
+	local text_area = script.Parent:WaitForChild("CommandContainer"):WaitForChild("CommandTextBox")
+	local timeout_text = script.Parent:WaitForChild("TimeoutMessage")
+	
+	text_area.Text = "Please wait..."
+	timeout_text.Text = "Currently updating..."	
+	
+	local new_token = ReplicatedStorage:WaitForChild("GetCurrentToken"):InvokeServer()
+	if new_token then
+		local player = Players.LocalPlayer
+		text_area.Text = "!verify "..player.Name.." "..new_token
+	else
+		text_area.Text = "An error occured. Contact the bot owner."
+	end
+	
+	local target_time = os.time() + client_config.time_increment
+	while os.time() < target_time do
+		local seconds_until_target = math.ceil(target_time - os.time())
+		local time_str
+		if seconds_until_target > 60 then
+			local minutes = math.floor(seconds_until_target / 60)
+			local seconds = seconds_until_target % 60
+			time_str = minutes.." minutes and "..seconds.." seconds"
+		else
+			time_str = seconds_until_target.." seconds"
+		end
+		timeout_text.Text = "Code will reset in "..time_str.."."
+		wait(1)
+	end
+end
+LocalScript SetTextFromSettings Source local client_config = require(game:GetService("ReplicatedStorage"):WaitForChild("client_config"))
+
+script.Parent:WaitForChild("Title").Text = client_config.title
+script.Parent:WaitForChild("IntroMessage").Text = client_config.intro_text
+LocalScript HideIfNotInStudio Source script.Parent.Visible = game:GetService("RunService"):IsStudio()
+LocalScript InitUI Tags 
+LocalScript CameraScript Tags 
+LocalScript SetDefaults Tags 
+LocalScript CodeUpdater Tags 
+LocalScript SetTextFromSettings Tags 
+LocalScript HideIfNotInStudio Tags 
+LocalizationService LocalizationService Tags 
+LuaWebService Instance Tags 
+ModuleScript server_secure_config LinkedSource 
+ModuleScript sha256 LinkedSource 
+ModuleScript bit LinkedSource 
+ModuleScript util LinkedSource 
+ModuleScript client_config LinkedSource 
+ModuleScript server_secure_config ScriptGuid {6849D621-6A9E-436F-8922-5237DE5E1802}
+ModuleScript sha256 ScriptGuid {272D87FE-393C-4BFE-BBBF-748CA4F1F668}
+ModuleScript bit ScriptGuid {62C2AFF3-E151-443E-A246-7F755DDF1093}
+ModuleScript util ScriptGuid {9292C8F3-BC2E-435B-A497-39AFEB757D10}
+ModuleScript client_config ScriptGuid {5524C845-BAFD-420F-871B-D5E3ADF929B1}
+ModuleScript server_secure_config Source -- This file is replaced by the Sylph-Verifier bot, when it writes its place file to disk.
+-- This is simply a placeholder.
+
+return {
+	shared_key = "test_key",
+	time_increment = 300,
+}
+ModuleScript sha256 Source local util = require(script.util)
+local bit = require(script.bit)
+local band, bor, bxor, bnot, lshift, rshift =
+  bit.band, bit.bor, bit.bxor, bit.bnot, bit.blshift, bit.blogic_rshift
+  
+local function decode_string(string)
+  local t = {}
+  for i=1,#string do
+    t[i] = string:byte(i)
+  end
+  return t
+end
+
+-- Bitwise operators
+local function ror(value, shift)
+  return bor(rshift(value, shift), lshift(value, 32-shift))
+end
+local function clamp(v)
+  return v % 0x100000000
+end
+
+local function encode_be(i)
+  return {band(rshift(i, 24), 0xFF), band(rshift(i, 16), 0xFF),
+          band(rshift(i,  8), 0xFF), band(i            , 0xFF)}
+end
+local function decode_be(t)
+  return bor(bor(lshift(t[1], 24), lshift(t[2], 16)), 
+             bor(lshift(t[3],  8), t[4]            ))
+end
+
+-- Table utils
+
+
+-- SHA256 code
+local sha256_k = {0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+                  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+                  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+                  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+                  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+                  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+                  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+                  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2}
+                  
+local chunk_size = 4 * 16
+local function preprocess(table)
+  local len = #table*8
+  table[#table+1] = 0x80
+  local target_size = (math.ceil((#table-(chunk_size-8))/chunk_size)+1)*chunk_size-4
+  util.pad_to_ip(table, target_size)
+  util.concat_table_ip(table, encode_be(len))
+end
+
+local function digest_fn(data)
+  data = util.clone_table(data)
+  preprocess(data, chunk_size)
+
+  local h0, h1, h2, h3, h4, h5, h6, h7 = 
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+
+  for _, w in ipairs(util.chunk_table(data, chunk_size)) do
+    w = util.chunk_table(w, 4)
+    util.map_ip(w, decode_be)
+    for i=17,#sha256_k do
+      local s0 = bxor(ror(w[i-15],  7), bxor(ror(w[i-15], 18), rshift(w[i-15],  3)))
+      local s1 = bxor(ror(w[i-2] , 17), bxor(ror(w[i-2] , 19), rshift(w[i-2] , 10)))
+      w[i] = clamp(w[i-16] + s0 + w[i-7] + s1)
+    end
+
+    local a, b, c, d, e, f, g, h =
+      h0, h1, h2, h3, h4, h5, h6, h7
+    for i=1,#sha256_k do
+      local S1    = bxor(ror(e, 6), bxor(ror(e, 11), ror(e, 25)))
+      local ch    = bxor(band(e, f), band(bnot(e), g))
+      local temp1 = h + S1 + ch + sha256_k[i] + w[i]
+      local S0    = bxor(ror(a, 2), bxor(ror(a, 13), ror(a, 22)))
+      local maj   = bxor(band(a, b), bxor(band(a, c), band(b, c)))
+      local temp2 = S0 + maj
+
+      a, b, c, d, e, f, g, h =
+        clamp(temp1 + temp2), a, b, c,
+        clamp(d + temp1)    , e, f, g
+    end
+    h0, h1, h2, h3, h4, h5, h6, h7 =
+      clamp(h0 + a), clamp(h1 + b), clamp(h2 + c), clamp(h3 + d), 
+      clamp(h4 + e), clamp(h5 + f), clamp(h6 + g), clamp(h7 + h)
+  end
+
+  return {h0, h1, h2, h3, h4, h5, h6, h7}
+end
+
+-- digest table creation
+local function sha256(data)
+  if type(data) == "string" then data = decode_string(data) end
+  local t = digest_fn(data)
+  return util.hash_output(encode_be, unpack(t, 1, 8))
+end
+local function hmac_sha256(key, data)
+  if type(data) == "string" then data = decode_string(data) end
+  if type(key ) == "string" then key  = decode_string(key ) end
+  
+  if #key > 64 then
+    key = sha256(key)
+  end
+  util.pad_to_ip(key, 64)
+
+  local k0 = util.map(key, util.partial(bit.bxor, 0x5c))
+  local k1 = util.map(key, util.partial(bit.bxor, 0x36))
+  util.concat_table_ip(k1, data)
+  util.concat_table_ip(k0, sha256(k1))
+  return sha256(k0)
+end
+
+return { sha256 = sha256, hmac_sha256 = hmac_sha256 }
+
+ModuleScript bit Source --[[---------------
+LuaBit v0.4
+-------------------
+a bitwise operation lib for lua.
+
+http://luaforge.net/projects/bit/
+
+How to use:
+-------------------
+ bit.bnot(n) -- bitwise not (~n)
+ bit.band(m, n) -- bitwise and (m & n)
+ bit.bor(m, n) -- bitwise or (m | n)
+ bit.bxor(m, n) -- bitwise xor (m ^ n)
+ bit.brshift(n, bits) -- right shift (n >> bits)
+ bit.blshift(n, bits) -- left shift (n << bits)
+ bit.blogic_rshift(n, bits) -- logic right shift(zero fill >>>)
+ 
+Please note that bit.brshift and bit.blshift only support number within
+32 bits.
+
+2 utility functions are provided too:
+ bit.tobits(n) -- convert n into a bit table(which is a 1/0 sequence)
+               -- high bits first
+ bit.tonumb(bit_tbl) -- convert a bit table into a number 
+-------------------
+
+Under the MIT license.
+
+copyright(c) 2006~2007 hanzhao (abrash_han@hotmail.com)
+--]]---------------
+
+------------------------
+-- bit lib implementions
+
+local bit
+
+local function check_int(n)
+ -- checking not float
+ if(n - math.floor(n) > 0) then
+  error("trying to use bitwise operation on non-integer!")
+ end
+end
+
+local function to_bits(n)
+ check_int(n)
+ if(n < 0) then
+  -- negative
+  return to_bits(bit.bnot(math.abs(n)) + 1)
+ end
+ -- to bits table
+ local tbl = {}
+ local cnt = 1
+ while (n > 0) do
+  local last = n % 2
+  if(last == 1) then
+   tbl[cnt] = 1
+  else
+   tbl[cnt] = 0
+  end
+  n = (n-last)/2
+  cnt = cnt + 1
+ end
+
+ return tbl
+end
+
+local function tbl_to_number(tbl)
+ local n = table.getn(tbl)
+
+ local rslt = 0
+ local power = 1
+ for i = 1, n do
+  rslt = rslt + tbl[i]*power
+  power = power*2
+ end
+ 
+ return rslt
+end
+
+local function expand(tbl_m, tbl_n)
+ local big = {}
+ local small = {}
+ if(table.getn(tbl_m) > table.getn(tbl_n)) then
+  big = tbl_m
+  small = tbl_n
+ else
+  big = tbl_n
+  small = tbl_m
+ end
+ -- expand small
+ for i = table.getn(small) + 1, table.getn(big) do
+  small[i] = 0
+ end
+
+end
+
+local function bit_or(m, n)
+ local tbl_m = to_bits(m)
+ local tbl_n = to_bits(n)
+ expand(tbl_m, tbl_n)
+
+ local tbl = {}
+ local rslt = math.max(table.getn(tbl_m), table.getn(tbl_n))
+ for i = 1, rslt do
+  if(tbl_m[i]== 0 and tbl_n[i] == 0) then
+   tbl[i] = 0
+  else
+   tbl[i] = 1
+  end
+ end
+ 
+ return tbl_to_number(tbl)
+end
+
+local function bit_and(m, n)
+ local tbl_m = to_bits(m)
+ local tbl_n = to_bits(n)
+ expand(tbl_m, tbl_n) 
+
+ local tbl = {}
+ local rslt = math.max(table.getn(tbl_m), table.getn(tbl_n))
+ for i = 1, rslt do
+  if(tbl_m[i]== 0 or tbl_n[i] == 0) then
+   tbl[i] = 0
+  else
+   tbl[i] = 1
+  end
+ end
+
+ return tbl_to_number(tbl)
+end
+
+local function bit_not(n)
+ 
+ local tbl = to_bits(n)
+ local size = math.max(table.getn(tbl), 32)
+ for i = 1, size do
+  if(tbl[i] == 1) then 
+   tbl[i] = 0
+  else
+   tbl[i] = 1
+  end
+ end
+ return tbl_to_number(tbl)
+end
+
+local function bit_xor(m, n)
+ local tbl_m = to_bits(m)
+ local tbl_n = to_bits(n)
+ expand(tbl_m, tbl_n) 
+
+ local tbl = {}
+ local rslt = math.max(table.getn(tbl_m), table.getn(tbl_n))
+ for i = 1, rslt do
+  if(tbl_m[i] ~= tbl_n[i]) then
+   tbl[i] = 1
+  else
+   tbl[i] = 0
+  end
+ end
+ 
+ --table.foreach(tbl, print)
+
+ return tbl_to_number(tbl)
+end
+
+local function bit_rshift(n, bits)
+ check_int(n)
+ 
+ local high_bit = 0
+ if(n < 0) then
+  -- negative
+  n = bit_not(math.abs(n)) + 1
+  high_bit = 2147483648 -- 0x80000000
+ end
+
+ for i=1, bits do
+  n = n/2
+  n = bit_or(math.floor(n), high_bit)
+ end
+ return math.floor(n)
+end
+
+-- logic rightshift assures zero filling shift
+local function bit_logic_rshift(n, bits)
+ check_int(n)
+ if(n < 0) then
+  -- negative
+  n = bit_not(math.abs(n)) + 1
+ end
+ for i=1, bits do
+  n = n/2
+ end
+ return math.floor(n)
+end
+
+local function bit_lshift(n, bits)
+ check_int(n)
+ 
+ if(n < 0) then
+  -- negative
+  n = bit_not(math.abs(n)) + 1
+ end
+
+ for i=1, bits do
+  n = n*2
+ end
+ return bit_and(n, 4294967295) -- 0xFFFFFFFF
+end
+
+local function bit_xor2(m, n)
+ local rhs = bit_or(bit_not(m), bit_not(n))
+ local lhs = bit_or(m, n)
+ local rslt = bit_and(lhs, rhs)
+ return rslt
+end
+
+bit = {
+ bnot = bit_not,
+ band = bit_and,
+ bor  = bit_or,
+ bxor = bit_xor,
+ brshift = bit_rshift,
+ blshift = bit_lshift,
+ bxor2 = bit_xor2,
+ blogic_rshift = bit_logic_rshift,
+
+ -- utility func
+ tobits = to_bits,
+ tonumb = tbl_to_number,
+}
+
+return bit
+
+ModuleScript util Source local util = {}
+
+-- Table functions
+function util.clone_table(table)
+  local new = {}
+  for k, v in pairs(table) do
+    new[k] = v
+  end
+  return new
+end
+local function unip(fn)
+  return function(table, ...)
+    local new = util.clone_table(table)
+    fn(new, ...)
+    return new
+  end
+end
+
+function util.pad_to_ip(table, length, filler)
+  filler = filler or 0
+  if #table>=length then return end
+  for i=#table+1,length do table[i] = filler end
+end
+util.pad_to = unip(util.pad_to_ip)
+
+function util.slice(table, from, to)
+  local new = {}
+  for i=1,(to-from+1) do
+    new[i] = table[i+from-1]
+  end
+  return new
+end
+function util.chunk_table(table, length, padding)
+  padding = padding or function(t)
+    return util.pad_to(t, length, 0)
+  end
+
+  local chunks = math.ceil(#table/length)
+  local new = {}
+  for i=1,chunks do
+    new[i] = padding(util.slice(table, (i-1)*length+1, i*length))
+  end
+  return new
+end
+
+function util.concat_table_ip(table1, table2)
+  local start=#table1
+  for i=1,#table2 do
+    table1[i+start] = table2[i]
+  end
+end
+util.concat_table = unip(util.concat_table_ip)
+
+-- helper functions
+function util.hash_output(encode, ...)
+  local t = {...}
+  local table = encode(t[1])
+  for i=2,#t do
+    util.concat_table_ip(table, encode(t[i]))
+  end
+  return table
+end
+
+-- FP functions
+function util.map_ip(table, fn)
+  for k, v in pairs(table) do
+    table[k] = fn(v, k)
+  end
+end
+util.map = unip(util.map_ip)
+
+function util.partial(fn, a)
+  return function(...)
+    return fn(a, ...)
+  end
+end
+
+return util
+
+ModuleScript client_config Source -- This file is replaced by the Sylph-Verifier bot, when it writes its place file to disk.
+-- This is simply a placeholder.
+
+return {
+	title = "Roblox Account Verifier",
+	intro_text = "To verify your Roblox account on <Discord Server Name>, please enter the following command in the #<channel name> channel.",
+	time_increment = 300,
+}
+ModuleScript server_secure_config Tags 
+ModuleScript sha256 Tags 
+ModuleScript bit Tags 
+ModuleScript util Tags 
+ModuleScript client_config Tags 
+NonReplicatedCSGDictionaryService NonReplicatedCSGDictionaryService Tags 
+PhysicsService PhysicsService Tags 
+Players Players Tags 
+RemoteFunction GetCurrentToken Tags 
+ReplicatedFirst ReplicatedFirst Tags 
+ReplicatedStorage ReplicatedStorage Tags 
+ScreenGui MainUi Tags 
+Script PlayerInit LinkedSource 
+Script TokenGeneratorService LinkedSource 
+Script PlayerInit ScriptGuid {6ABFC03F-0778-46BF-9FFD-2539F09B88DF}
+Script TokenGeneratorService ScriptGuid {B1238E5B-1B3B-469C-8896-26D258E03CBD}
+Script PlayerInit Source -- Services
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+
+Players.PlayerAdded:Connect(function (player)	
+	-- Copy the UI over to the player. CharacterAutoLoads false prevents this from happening automagically.
+	
+	if not game:GetService("RunService"):IsStudio() and Players.MaxPlayers ~= 1 then
+		player:Kick("MaxPlayers must be set to 1! Please see the troubleshooting section in the manual for instructions.")
+	else
+		local playerGui = player:WaitForChild("PlayerGui")
+		for _, item in pairs(StarterGui:GetChildren("StarterGui")) do
+			item:Clone().Parent = playerGui 
+		end		
+	end
+end)
+Script TokenGeneratorService Source local server_secure_config = require(script.server_secure_config)
+local sha256 = require(script.sha256)
+
+local characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+local code_length = 6
+
+local token_version = 1
+
+local function sha256_token(key, data)
+	local digest = sha256.hmac_sha256(key, data)
+	
+	local accum = 0
+	for i=1,6 do
+		accum = (accum * 256) + digest[i]
+	end
+	
+	local str = ""
+	for _=1,code_length do
+		local char = accum % #characters + 1
+		str = str .. characters:sub(char, char)
+		accum = math.floor(accum / #characters)
+	end
+	
+	return str
+end
+local function make_data(time_increment, player_id)
+	assert(type(time_increment) == "number" and time_increment % 1 == 0 and time_increment > 0,
+     	   "time increment is not a positive integer")
+	assert(type(player_id) == "number" and player_id % 1 == 0 and player_id >= 0,
+     	   "player id is not a non-negative integer")
+	local time_int = math.floor(os.time()/time_increment)
+	return token_version.."|"..tostring(time_int).."|"..tostring(player_id)
+end
+local function make_token(player_id)
+	local data = make_data(server_secure_config.time_increment, player_id)
+	
+	local found_player = false
+	for _, player in ipairs(game.Players:GetPlayers()) do
+		if player.UserId == player_id then
+			found_player = true
+			break
+		end
+	end
+	assert(found_player, "Player not in server!!")
+	
+	return sha256_token(server_secure_config.shared_key, data)
+end
+
+local GetCurrentToken = game.ReplicatedStorage.GetCurrentToken
+function GetCurrentToken.OnServerInvoke(player)
+	local success, token = pcall(make_token, player.UserId)
+	if not success then
+		return nil
+	else
+		return token
+	end
+end
+Script PlayerInit Tags 
+Script TokenGeneratorService Tags 
+ScriptService Instance Tags 
+Selection Selection Tags 
+ServerScriptService ServerScriptService Tags 
+ServerStorage ServerStorage Tags 
+Sky Sky MoonTextureId rbxasset://sky/moon.jpg
+Sky Sky SkyboxBk http://www.roblox.com/asset/?id=150553096
+Sky Sky SkyboxDn http://www.roblox.com/asset/?id=150553062
+Sky Sky SkyboxFt http://www.roblox.com/asset/?id=150553119
+Sky Sky SkyboxLf http://www.roblox.com/asset/?id=150553049
+Sky Sky SkyboxRt http://www.roblox.com/asset/?id=150553079
+Sky Sky SkyboxUp http://www.roblox.com/asset/?id=150553131
+Sky Sky SunTextureId rbxasset://sky/sun.jpg
+Sky Sky Tags 
+SoundService SoundService Tags 
+StarterCharacterScripts StarterCharacterScripts Tags 
+StarterGui StarterGui Tags 
+StarterPack StarterPack Tags 
+StarterPlayer StarterPlayer Tags 
+StarterPlayerScripts StarterPlayerScripts Tags 
+Teams Teams Tags 
+TeleportService Teleport Service Tags 
+Terrain Terrain SmoothGrid 
+Terrain Terrain Tags 
+TestService TestService Description 
+TestService TestService Tags 
+TextLabel IntroMessage Tags 
+TextLabel Title Tags 
+TextLabel CommandTextBox Tags 
+TextLabel TimeoutMessage Tags 
+TextLabel DebugStudioMessage Tags 
+TextLabel IntroMessage Text Intro message goes here. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam blandit felis id suscipit porttitor. Nullam cursus elementum maximus.
+TextLabel Title Text <Title goes here>
+TextLabel CommandTextBox Text Please wait...
+TextLabel TimeoutMessage Text Code will reset in <time>.
+TextLabel DebugStudioMessage Text DEBUG MODE
+TimerService Instance Tags 
+TouchInputService TouchInputService Tags 
+TweenService TweenService Tags 
+UIPadding UIPadding Tags 
+UIPadding UIPadding Tags 
+UIPadding UIPadding Tags 
+VRService VRService Tags 
+Workspace Workspace CollisionGroups Default^0^1
+Workspace Workspace Tags 
