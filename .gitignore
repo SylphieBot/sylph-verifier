@@ -2,3 +2,6 @@
 /.idea
 /dist
 /*.iml
+
+/Sylph-Verifier.db
+/test.rbxl

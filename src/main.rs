@@ -1,31 +1,35 @@
-// TODO: Remove this when global allocators are stabilized.
-#![feature(global_allocator, allocator_api, alloc_system)]
-extern crate alloc_system;
-#[global_allocator] static ALLOC: alloc_system::System = alloc_system::System;
-
 extern crate byteorder;
 extern crate constant_time_eq;
+extern crate dotenv;
+extern crate fs2;
 extern crate hmac;
+extern crate libc;
+extern crate parking_lot;
 extern crate rusqlite;
 extern crate sha2;
+extern crate thread_local;
 extern crate uuid;
 
+#[macro_use] extern crate diesel;
+#[macro_use] extern crate diesel_codegen;
 #[macro_use] extern crate error_chain;
+#[macro_use] extern crate log;
 #[macro_use] extern crate serenity;
 
+mod boot;
+mod database;
 mod errors;
-mod lz4;
-mod place;
+mod roblox;
 mod token;
+mod util;
+
+// TODO: Ensure panics/etc stay onscreen long enough to read.
 
 fn main() {
-    let ctx = token::TokenContext::new("test_key".as_bytes(), 300);
-    println!("{}", ctx.make_token(436430689, 0).unwrap());
+    dotenv::dotenv().expect("dotenv error");
 
-    use std::io::Write;
-    let place_data = place::create_place_file(None, vec![
-        place::LuaConfigEntry::new("test_a", true , "test"),
-        place::LuaConfigEntry::new("test_b", false, "test"),
-    ]).unwrap();
-    ::std::fs::File::create("test.rbxl").unwrap().write(&place_data).unwrap();
+    let ret = boot::start();
+    if ret != 0 {
+        ::std::process::exit(ret)
+    }
 }

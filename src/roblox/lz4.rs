@@ -1,8 +1,7 @@
-extern crate libc;
 extern crate lz4_sys;
 
 use errors::*;
-use self::libc::*;
+use libc::*;
 
 // While these are defined as c_char in the actual headers, we cheat a little.
 // Hopefully this isn't an UB invitation.

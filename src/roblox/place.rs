@@ -1,10 +1,10 @@
 use byteorder::*;
 use errors::*;
+use roblox::lz4;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Write as FmtWrite, Result as FmtResult};
 use std::io::{Read, Write, Cursor};
-use lz4;
 use uuid::Uuid;
 
 const RBLX_HEADER: &[u8] = &[0x3C, 0x72, 0x6F, 0x62, 0x6C, 0x6F, 0x78, 0x21,
@@ -309,12 +309,14 @@ fn make_config(config: &Vec<LuaConfigEntry>, is_server: bool) -> Result<String> 
     Ok(s)
 }
 
-const PLACE_TEMPLATE: &[u8] = include_bytes!("../place-template.rbxl");
+const PLACE_TEMPLATE: &[u8] = include_bytes!("place-template.rbxl");
+const TEMPLATE_VERSION: &'static str = "1";
 pub fn create_place_file(overwrite_template: Option<&[u8]>,
                          config: Vec<LuaConfigEntry>) -> Result<Vec<u8>> {
     let place_file = overwrite_template.unwrap_or(PLACE_TEMPLATE);
     let mut place = parse_rblx_container(place_file)?;
-    map_string_properties(&mut place, |type_name, obj_name, prop_name, _| {
+    let mut version_found = false;
+    map_string_properties(&mut place, |type_name, obj_name, prop_name, prop_value| {
         Ok(match (type_name, obj_name, prop_name) {
             ("ModuleScript", "server_secure_config", "Source") =>
                 Some(make_config(&config, true )?),
@@ -325,9 +327,16 @@ pub fn create_place_file(overwrite_template: Option<&[u8]>,
                 Some(format!("{{{}}}", Uuid::new_v4())),
             ("TextLabel", "TemplateMessage", "Text") =>
                 Some("".to_owned()),
+            ("StringValue", "TemplateVersion", "Value") => {
+                ensure!(prop_value == TEMPLATE_VERSION, ErrorKind::WrongPlaceVersion);
+                version_found = true;
+                None
+            }
             _ => None,
         })
     })?;
+
+    ensure!(version_found, ErrorKind::WrongPlaceVersion);
 
     let mut cursor = Cursor::new(Vec::new());
     write_rblx_container(&mut cursor, &place)?;
