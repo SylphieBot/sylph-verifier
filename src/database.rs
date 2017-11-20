@@ -12,7 +12,7 @@ struct ConnectionManager {
 }
 impl ConnectionManager {
     pub fn new(path: &Path) -> Result<ConnectionManager> {
-        let path = path.to_str().chain_err(|| ErrorKind::InvalidPath(path.to_owned()))?;
+        let path = path.to_str().chain_err(|| format!("invalid db path: {}", path.display()))?;
         Ok(ConnectionManager {
             db_uri: format!("file:{}?mode=rwc&cache=shared",
                             utf8_percent_encode(path, DEFAULT_ENCODE_SET))

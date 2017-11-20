@@ -1,9 +1,10 @@
-use std::env::current_exe;
-use std::path::*;
+use errors::*;
+use std::env;
+use std::path::PathBuf;
 
-pub fn bin_relative(buf: &str) -> PathBuf {
-    let mut path = current_exe().expect("cannot get current exe path");
+pub fn bin_relative(buf: &str) -> Result<PathBuf> {
+    let mut path = env::current_exe().chain_err(|| "cannot get current exe path")?;
     path.pop();
     path.push(buf);
-    path
+    Ok(path)
 }

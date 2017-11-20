@@ -130,9 +130,18 @@ impl TokenContext {
         Token::from_arr(chars)
     }
 
-    pub fn make_token(&self, user_id: u64, time_increment_offset: i64) -> Result<Token> {
+    fn make_token(&self, user_id: u64, time_increment_offset: i64) -> Result<Token> {
         let unix_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         let time_int = (unix_time / self.time_increment as u64) as i64 + time_increment_offset;
         Ok(self.sha256_token(&format!("{}|{}|{}", TOKEN_VERSION, time_int, user_id)))
+    }
+
+    pub fn check_token(&self, user: RobloxUserID, token: &str) -> Result<bool> {
+        let token = Token::from_str(token)?;
+        let result =
+            token == self.make_token(user.0,  0)? ||
+            token == self.make_token(user.0, -1)? ||
+            token == self.make_token(user.0,  1)?;
+        Ok(result)
     }
 }

@@ -66,17 +66,21 @@ fn read_cursor_slice_to_end<'a>(cursor: Cursor<&'a [u8]>) -> &'a [u8] {
     &cursor.into_inner()[start..]
 }
 
+fn check_unknown_field<R: Read>(r: &mut R) -> Result<()> {
+    ensure!(r.read_u32::<LE>()? == 0, "unknown field has unexpected value");
+    Ok(())
+}
 fn parse_rblx_container(data: &[u8]) -> Result<RblxData> {
     let mut cursor = Cursor::new(data);
 
     let mut read_header = [0u8; 16];
     cursor.read(&mut read_header)?;
-    ensure!(&read_header == RBLX_HEADER, ErrorKind::RblxWrongHeader);
+    ensure!(&read_header == RBLX_HEADER, "incorrect place file header");
 
     let type_count = cursor.read_u32::<LE>()?;
     let inst_count = cursor.read_u32::<LE>()?;
-    ensure!(cursor.read_u32::<LE>()? == 0, ErrorKind::NonZeroUnknownField);
-    ensure!(cursor.read_u32::<LE>()? == 0, ErrorKind::NonZeroUnknownField);
+    check_unknown_field(&mut cursor);
+    check_unknown_field(&mut cursor);
 
     let mut entries = Vec::new();
     loop {
@@ -84,7 +88,7 @@ fn parse_rblx_container(data: &[u8]) -> Result<RblxData> {
         if kind != END0_HEADER {
             let compressed_len = cursor.read_u32::<LE>()?;
             let decompressed_len = cursor.read_u32::<LE>()?;
-            ensure!(cursor.read_u32::<LE>()? == 0, ErrorKind::NonZeroUnknownField);
+            check_unknown_field(&mut cursor);
             let data = read_cursor_slice(&mut cursor, compressed_len as usize);
             entries.push(RblxEntry { kind, data: RblxCompressed::Compressed {
                 decompressed_len, data
@@ -94,7 +98,7 @@ fn parse_rblx_container(data: &[u8]) -> Result<RblxData> {
         }
     }
 
-    ensure!(read_cursor_slice_to_end(cursor) == RBLX_END, ErrorKind::RblxWrongFooter);
+    ensure!(read_cursor_slice_to_end(cursor) == RBLX_END, "incorrect place file footer");
     Ok(RblxData { type_count, inst_count, entries })
 }
 fn parse_types(rblx: &RblxData) -> Result<HashMap<u32, String>> {
@@ -166,7 +170,7 @@ fn map_string_properties<F>(rblx: &mut RblxData, mut f: F) -> Result<()>
                 if let Some(prop) = parse_string_property(entry.data.decompress()?.as_ref())? {
                     if prop.prop_name == "Name" {
                         let type_name = types.remove(&prop.type_id)
-                            .chain_err(|| ErrorKind::UnknownTypeID(prop.type_id))?;
+                            .chain_err(|| format!("unknown type id: {}", prop.type_id))?;
                         type_names.insert(prop.type_id, (type_name, Some(prop.prop_values)));
                     } else {
                         map_targets.push((prop.type_id, prop.prop_name, prop.prop_values, entry));
@@ -181,7 +185,7 @@ fn map_string_properties<F>(rblx: &mut RblxData, mut f: F) -> Result<()>
     for (type_id, prop_name, mut prop_values, entry_target) in map_targets {
         let mut modified = false;
         let type_data = type_names.get(&type_id)
-            .chain_err(|| ErrorKind::UnknownTypeID(type_id))?;
+            .chain_err(|| format!("unknown type id: {}", type_id))?;
         if let &Some(ref names) = &type_data.1 {
             for (value, name) in prop_values.iter_mut().zip(names.iter()) {
                 if let Some(new_value) = f(&type_data.0, name, &prop_name, &value)? {
@@ -353,7 +357,9 @@ pub fn create_place_file(overwrite_template: Option<&[u8]>,
             ("TextLabel", "TemplateMessage", "Text") =>
                 Some("".to_owned()),
             ("StringValue", "TemplateVersion", "Value") => {
-                ensure!(prop_value == TEMPLATE_VERSION, ErrorKind::WrongPlaceVersion);
+                ensure!(prop_value == TEMPLATE_VERSION,
+                        "wrong place template version: expected '{}', got '{}'",
+                        TEMPLATE_VERSION, prop_value);
                 version_found = true;
                 None
             }
@@ -361,7 +367,7 @@ pub fn create_place_file(overwrite_template: Option<&[u8]>,
         })
     })?;
 
-    ensure!(version_found, ErrorKind::WrongPlaceVersion);
+    ensure!(version_found, "place has no version property");
 
     let mut cursor = Cursor::new(Vec::new());
     write_rblx_container(&mut cursor, &place)?;

@@ -3,9 +3,17 @@
 use diesel;
 use error_chain::{Backtrace, ChainedError};
 use r2d2;
+use reqwest;
+use serde_json;
 use std;
+use std::any::Any;
+use std::borrow::Cow;
+use std::cell::RefCell;
 use std::fmt::Write;
+use std::ops::Deref;
 use std::path::PathBuf;
+use std::panic::*;
+
 
 error_chain! {
     foreign_links {
@@ -16,6 +24,8 @@ error_chain! {
         R2D2_GetTimeout(r2d2::GetTimeout);
         R2D2_InitializationError(r2d2::InitializationError);
         R2D2_RunMigrationsError(diesel::migrations::RunMigrationsError);
+        Reqwest(reqwest::Error);
+        SerdeJson(serde_json::Error);
         Str_Utf8Error(std::str::Utf8Error);
         String_FromUtf8Error(std::string::FromUtf8Error);
         SystemTimeError(std::time::SystemTimeError);
@@ -26,34 +36,12 @@ error_chain! {
             description("token must be six upper case letters")
         }
 
-        InvalidPath(path: PathBuf) {
-            description("invalid path")
-            display("invalid path: {}", path.display())
-        }
-
         LZ4Error {
             description("LZ4 error")
         }
 
-        RblxWrongHeader {
-            description("place file had invalid header")
-        }
-
-        RblxWrongFooter {
-            description("place file had invalid footer")
-        }
-
-        NonZeroUnknownField {
-            description("unknown field in place file not zero")
-        }
-
-        UnknownTypeID(v: u32) {
-            description("found unknown type id")
-            display("found unknown type id: {}", v)
-        }
-
-        WrongPlaceVersion {
-            description("wrong place version")
+        Panicked {
+            description("panic encountered")
         }
     }
 }
@@ -65,9 +53,9 @@ fn make_backtrace_str(backtrace: Option<&Backtrace>) -> String {
         format!("(current backtrace)\n{:?}", Backtrace::new())
     }
 }
-fn make_error_report(cause: &str, backtrace: &str) -> Result<String> {
+fn make_error_report(cause: &str, backtrace: &str, kind: &str) -> Result<String> {
     let mut buf = String::new();
-    writeln!(buf, "--- Sylph-Verifier Error Report ---")?;
+    writeln!(buf, "--- Sylph-Verifier {} Report ---", kind)?;
     writeln!(buf)?;
     writeln!(buf, "Version: {} {} ({}{}{})",
                   env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"), env!("TARGET"),
@@ -95,16 +83,63 @@ fn cause_from_error<E: ChainedError>(e: &E) -> Result<String> {
     }
     Ok(buf)
 }
+fn cause_from_panic(info: &(Any + Send)) -> Cow<'static, str> {
+    if let Some(&s) = info.downcast_ref::<&str>() {
+        Cow::from(s.to_string())
+    } else if let Some(s) = info.downcast_ref::<String>() {
+        Cow::from(s.clone())
+    } else {
+        Cow::from("Panicked: <could not get panic error>")
+    }
+}
+
 fn report_from_error<E: ChainedError>(e: &E) -> Result<String> {
     let cause = cause_from_error(e)?;
     let backtrace = make_backtrace_str(e.backtrace());
-    make_error_report(&cause, &backtrace)
+    make_error_report(&cause, &backtrace, "Error")
+}
+fn report_from_panic(info: &(Any + Send)) -> Result<String> {
+    let cause = cause_from_panic(info);
+    let backtrace = make_backtrace_str(None);
+    make_error_report(cause.as_ref(), &backtrace, "Panic")
 }
 
-pub fn error_report_test() {
-    ::std::env::set_var("RUST_BACKTRACE", "1");
-    println!("{}", report_from_error(&Error::from_kind(ErrorKind::WrongPlaceVersion)
-        .chain_err(|| ErrorKind::WrongPlaceVersion)
-        .chain_err(|| ErrorKind::WrongPlaceVersion)
-        .chain_err(|| ErrorKind::WrongPlaceVersion)).unwrap());
+struct ParsedPanicLocation {
+    file: String, line: u32, column: u32,
+}
+struct ParsedPanicInfo {
+    cause_str: Cow<'static, str>, location: Option<ParsedPanicLocation>,
+}
+enum PanicInfoStatus {
+    NoPanic, PanicReady, Error, PanicInfo(ParsedPanicInfo),
+}
+thread_local! {
+    static PANIC_INFO: RefCell<PanicInfoStatus> = RefCell::new(PanicInfoStatus::NoPanic);
+}
+
+fn set_info(status: PanicInfoStatus) {
+    PANIC_INFO.with(|info| {
+        let mut info = info.borrow_mut();
+        *info = status;
+    })
+}
+pub fn init_panic_hook() {
+    let default_hook = take_hook();
+    set_hook(Box::new(move |panic_info| {
+        PANIC_INFO.with(|info| {
+            if let &PanicInfoStatus::NoPanic = info.borrow().deref() {
+                default_hook(panic_info)
+            } else if let &PanicInfoStatus::Error = info.borrow().deref() {
+                // Ignored
+            } else {
+                set_info(PanicInfoStatus::PanicInfo(ParsedPanicInfo {
+                    cause_str: cause_from_panic(panic_info.payload()),
+                    location: panic_info.location().map(|location| ParsedPanicLocation {
+                        file: location.file().to_owned(),
+                        line: location.line(), column: location.column(),
+                    })
+                }))
+            }
+        })
+    }))
 }

@@ -21,18 +21,21 @@ dotenv = "0.10"
 error-chain = { version = "0.11", git = "https://github.com/Lymia/error-chain.git", branch = "optimize-for-size" }
 fs2 = "0.4"
 hmac = "0.5"
-hyper = "0.11"
 lazy_static = "0.2"
 libc = "0.2"
 libsqlite3-sys = { version = "0.8", features = ["bundled"] }
 log = "0.3"
 lz4-sys = "1.8"
+nom = { version = "3.2", features = ["regexp", "regexp_macros", "verbose-errors"] }
 parking_lot = { version = "0.5", features = ["nightly"] }
 percent-encoding = "1.0"
 r2d2 = "0.7"
 rand = "0.3"
 regex = "0.2"
-select = "0.4"
+reqwest = "0.8"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
 serenity = "0.4"
 sha2 = "0.7"
 uuid = { version = "0.5", features = ["v4"] }
