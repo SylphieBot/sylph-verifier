@@ -1,3 +1,4 @@
+use database::*;
 use errors::*;
 use fs2::*;
 use roblox::*;
@@ -14,6 +15,7 @@ fn check_lock() -> Result<File> {
     Ok(lock_file)
 }
 
+const DB_FILE_NAME: &'static str = "Sylph-Verifier.db";
 pub fn start() -> i32 {
     let _lock_file = match check_lock() {
         Ok(lock) => lock,
@@ -22,17 +24,17 @@ pub fn start() -> i32 {
             return 1
         }
     };
+    let db = Database::new(bin_relative(DB_FILE_NAME)).unwrap();
 
-    let ctx = TokenContext::new("test_key".as_bytes(), 300);
+    let ctx = TokenContext::from_db(&db.connect().expect("database to connect"), 300).unwrap();
     println!("{}", ctx.make_token(436430689, 0).unwrap());
 
     error_report_test();
 
     use std::io::Write;
-    let place_data = create_place_file(None, vec![
-        LuaConfigEntry::new("test_a", true , "test"),
-        LuaConfigEntry::new("test_b", false, "test"),
-    ]).unwrap();
+    let mut config = Vec::new();
+    ctx.add_config(&mut config);
+    let place_data = create_place_file(None, config).unwrap();
     ::std::fs::File::create("test.rbxl").unwrap().write(&place_data).unwrap();
 
     0

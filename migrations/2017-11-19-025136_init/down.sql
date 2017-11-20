@@ -1,0 +1,3 @@
+DROP TABLE roblox_verification_keys;
+DROP TABLE roblox_verification_cooldown;
+DROP TABLE roblox_verification;

@@ -1,20 +1,34 @@
+#![allow(non_camel_case_types)]
+
+use diesel;
 use error_chain::{Backtrace, ChainedError};
+use r2d2;
 use std;
 use std::fmt::Write;
-use rusqlite;
+use std::path::PathBuf;
 
 error_chain! {
     foreign_links {
+        Diesel(diesel::result::Error);
+        Diesel_ConnectionError(diesel::result::ConnectionError);
         Fmt(std::fmt::Error);
         Io(std::io::Error);
-        StringFromUtf8Error(std::string::FromUtf8Error);
+        R2D2_GetTimeout(r2d2::GetTimeout);
+        R2D2_InitializationError(r2d2::InitializationError);
+        R2D2_RunMigrationsError(diesel::migrations::RunMigrationsError);
+        Str_Utf8Error(std::str::Utf8Error);
+        String_FromUtf8Error(std::string::FromUtf8Error);
         SystemTimeError(std::time::SystemTimeError);
-        Rusqlite(rusqlite::Error);
     }
 
     errors {
         InvalidToken {
             description("token must be six upper case letters")
+        }
+
+        InvalidPath(path: PathBuf) {
+            description("invalid path")
+            display("invalid path: {}", path.display())
         }
 
         LZ4Error {
@@ -40,10 +54,6 @@ error_chain! {
 
         WrongPlaceVersion {
             description("wrong place version")
-        }
-
-        UnknownDatabaseVersion {
-            description("unknown database version")
         }
     }
 }

@@ -17,18 +17,24 @@ byteorder = "1.1"
 constant_time_eq = "0.1"
 diesel = { version = "0.16", features = ["sqlite"] }
 diesel_codegen = { version = "0.16", features = ["sqlite"] }
-dotenv = "0.9"
+dotenv = "0.10"
 error-chain = { version = "0.11", git = "https://github.com/Lymia/error-chain.git", branch = "optimize-for-size" }
 fs2 = "0.4"
-hmac = "0.4"
+hmac = "0.5"
+hyper = "0.11"
+lazy_static = "0.2"
 libc = "0.2"
+libsqlite3-sys = { version = "0.8", features = ["bundled"] }
 log = "0.3"
 lz4-sys = "1.8"
 parking_lot = { version = "0.5", features = ["nightly"] }
-rusqlite = { version = "0.12", features = ["bundled"] }
+percent-encoding = "1.0"
+r2d2 = "0.7"
+rand = "0.3"
+regex = "0.2"
+select = "0.4"
 serenity = "0.4"
-sha2 = "0.6"
-thread_local = "0.3"
+sha2 = "0.7"
 uuid = { version = "0.5", features = ["v4"] }
 
 [build-dependencies]

@@ -7,11 +7,8 @@ use std::fmt::{Display, Formatter, Write as FmtWrite, Result as FmtResult};
 use std::io::{Read, Write, Cursor};
 use uuid::Uuid;
 
-const RBLX_HEADER: &[u8] = &[0x3C, 0x72, 0x6F, 0x62, 0x6C, 0x6F, 0x78, 0x21,
-                             0x89, 0xFF, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00];
-const RBLX_END: &[u8] = &[0x00, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00,
-                          0x00, 0x00, 0x00, 0x00, 0x3C, 0x2F, 0x72, 0x6F,
-                          0x62, 0x6C, 0x6F, 0x78, 0x3E];
+const RBLX_HEADER: &[u8] = b"<roblox!\x89\xff\r\n\x1a\n\x00\x00";
+const RBLX_END: &[u8] = b"\x00\x00\x00\x00\t\x00\x00\x00\x00\x00\x00\x00</roblox>";
 
 const INST_HEADER: u32 = 0x494E5354;
 const PROP_HEADER: u32 = 0x50524F50;
@@ -226,42 +223,70 @@ fn write_rblx_container<W: Write>(w: &mut W, rblx: &RblxData) -> Result<()> {
 }
 
 #[derive(Clone, Debug)]
-pub enum LuaConfigValue {
-    String(String), Double(f64), Nil,
+pub enum LuaConfigValue<'a> {
+    String(Cow<'a, str>), Double(f64), Nil,
 }
-fn lua_escape_str(str: &str) -> String {
-    format!("[[{}]]", str.replace("]", "]]..']'..[["))
-}
-impl Display for LuaConfigValue {
+impl <'a> Display for LuaConfigValue<'a> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
-            &LuaConfigValue::String(ref s) => f.write_str(&lua_escape_str(s)),
+            &LuaConfigValue::String(ref s) => write!(f, "[[{}]]", s.replace("]", "]]..']'..[[")),
             &LuaConfigValue::Double(val) => val.fmt(f),
             &LuaConfigValue::Nil => f.write_str("nil"),
         }
     }
 }
-impl <'a> From<&'a str> for LuaConfigValue {
+impl <'a> From<&'a str> for LuaConfigValue<'a> {
     fn from(s: &'a str) -> Self {
-        LuaConfigValue::String(s.to_owned())
+        LuaConfigValue::String(Cow::from(s))
     }
 }
-impl <'a> From<String> for LuaConfigValue {
+impl <'a> From<&'a String> for LuaConfigValue<'a> {
+    fn from(s: &'a String) -> Self {
+        LuaConfigValue::String(Cow::from(s.as_ref()))
+    }
+}
+impl <'a> From<String> for LuaConfigValue<'a> {
     fn from(s: String) -> Self {
-        LuaConfigValue::String(s)
+        LuaConfigValue::String(Cow::from(s))
     }
 }
-impl From<u32> for LuaConfigValue {
+impl <'a> From<i8> for LuaConfigValue<'a> {
+    fn from(i: i8) -> Self {
+        LuaConfigValue::Double(i as f64)
+    }
+}
+impl <'a> From<u8> for LuaConfigValue<'a> {
+    fn from(i: u8) -> Self {
+        LuaConfigValue::Double(i as f64)
+    }
+}
+impl <'a> From<i16> for LuaConfigValue<'a> {
+    fn from(i: i16) -> Self {
+        LuaConfigValue::Double(i as f64)
+    }
+}
+impl <'a> From<u16> for LuaConfigValue<'a> {
+    fn from(i: u16) -> Self {
+        LuaConfigValue::Double(i as f64)
+    }
+}
+impl <'a> From<i32> for LuaConfigValue<'a> {
+    fn from(i: i32) -> Self {
+        LuaConfigValue::Double(i as f64)
+    }
+}
+impl <'a> From<u32> for LuaConfigValue<'a> {
     fn from(i: u32) -> Self {
         LuaConfigValue::Double(i as f64)
     }
 }
-impl From<f64> for LuaConfigValue {
+// i64/u64 cannot be expressed unambigiously as f64
+impl <'a> From<f64> for LuaConfigValue<'a> {
     fn from(d: f64) -> Self {
         LuaConfigValue::Double(d)
     }
 }
-impl <T : Into<LuaConfigValue>> From<Option<T>> for LuaConfigValue {
+impl <'a, T : Into<LuaConfigValue<'a>>> From<Option<T>> for LuaConfigValue<'a> {
     fn from(o: Option<T>) -> Self {
         match o {
             Some(x) => x.into(),
@@ -271,11 +296,11 @@ impl <T : Into<LuaConfigValue>> From<Option<T>> for LuaConfigValue {
 }
 
 #[derive(Clone, Debug)]
-pub struct LuaConfigEntry {
-    name: &'static str, is_secret: bool, value: LuaConfigValue,
+pub struct LuaConfigEntry<'a> {
+    name: &'static str, is_secret: bool, value: LuaConfigValue<'a>,
 }
-impl LuaConfigEntry {
-    pub fn new<T : Into<LuaConfigValue>>(name: &'static str, is_secret: bool, v: T) -> Self {
+impl <'a> LuaConfigEntry<'a> {
+    pub fn new<T : Into<LuaConfigValue<'a>>>(name: &'static str, is_secret: bool, v: T) -> Self {
         LuaConfigEntry {
             name, is_secret, value: v.into(),
         }
