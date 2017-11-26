@@ -1,5 +1,6 @@
 #![allow(non_camel_case_types)]
 
+use chrono::Utc;
 use diesel;
 use error_chain::{Backtrace, ChainedError};
 use r2d2;
@@ -9,11 +10,12 @@ use std;
 use std::any::Any;
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::fmt::Write;
-use std::ops::Deref;
-use std::path::PathBuf;
+use std::fmt::{Write as FmtWrite};
+use std::fs;
+use std::fs::File;
+use std::io::{Write as IoWrite};
 use std::panic::*;
-
+use std::path::PathBuf;
 
 error_chain! {
     foreign_links {
@@ -93,19 +95,8 @@ fn cause_from_panic(info: &(Any + Send)) -> Cow<'static, str> {
     }
 }
 
-fn report_from_error<E: ChainedError>(e: &E) -> Result<String> {
-    let cause = cause_from_error(e)?;
-    let backtrace = make_backtrace_str(e.backtrace());
-    make_error_report(&cause, &backtrace, "Error")
-}
-fn report_from_panic(info: &(Any + Send)) -> Result<String> {
-    let cause = cause_from_panic(info);
-    let backtrace = make_backtrace_str(None);
-    make_error_report(cause.as_ref(), &backtrace, "Panic")
-}
-
 struct ParsedPanicLocation {
-    file: String, line: u32, column: u32,
+    file: String, line: u32,
 }
 struct ParsedPanicInfo {
     cause_str: Cow<'static, str>, location: Option<ParsedPanicLocation>,
@@ -127,19 +118,39 @@ pub fn init_panic_hook() {
     let default_hook = take_hook();
     set_hook(Box::new(move |panic_info| {
         PANIC_INFO.with(|info| {
-            if let &PanicInfoStatus::NoPanic = info.borrow().deref() {
+            if let &PanicInfoStatus::NoPanic = &*info.borrow() {
                 default_hook(panic_info)
-            } else if let &PanicInfoStatus::Error = info.borrow().deref() {
+            } else if let &PanicInfoStatus::Error = &*info.borrow() {
                 // Ignored
             } else {
                 set_info(PanicInfoStatus::PanicInfo(ParsedPanicInfo {
                     cause_str: cause_from_panic(panic_info.payload()),
                     location: panic_info.location().map(|location| ParsedPanicLocation {
-                        file: location.file().to_owned(),
-                        line: location.line(), column: location.column(),
+                        file: location.file().to_owned(), line: location.line(),
                     })
                 }))
             }
         })
     }))
+}
+
+fn write_error_report(kind: &str, report: &str) -> Result<PathBuf> {
+    let mut path = PathBuf::from("logs") /* TODO Fix */;
+    fs::create_dir_all(&path)?;
+    let file_name = format!("{}_report_{}.log", kind, Utc::now().format("%Y%m%d_%H%M%S%f"));
+    path.push(file_name);
+    let mut out = File::create(&path)?;
+    out.write_all(report.as_bytes())?;
+    Ok(path)
+}
+
+fn report_from_error<E: ChainedError>(e: &E) -> Result<String> {
+    let cause = cause_from_error(e)?;
+    let backtrace = make_backtrace_str(e.backtrace());
+    make_error_report(&cause, &backtrace, "Error")
+}
+fn report_from_panic(info: &(Any + Send)) -> Result<String> {
+    let cause = cause_from_panic(info);
+    let backtrace = make_backtrace_str(None);
+    make_error_report(cause.as_ref(), &backtrace, "Panic")
 }

@@ -1,6 +1,7 @@
 CREATE TABLE roblox_verification_keys (
   id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-  key TEXT NOT NULL, time_increment INT NOT NULL CHECK (time_increment > 0)
+  key TEXT NOT NULL, time_increment INT NOT NULL CHECK (time_increment > 0),
+  version INT NOT NULL, change_reason TEXT NOT NULL
 );
 
 CREATE TABLE roblox_verification_cooldown (
@@ -24,4 +25,8 @@ CREATE TABLE discord_active_roles (
   discord_role_id BIGINT NOT NULL, discord_role_name TEXT NOT NULL,
   last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (discord_guild_id, role_name)
-)
+) WITHOUT ROWID;
+
+CREATE TABLE console_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, text TEXT NOT NULL
+);

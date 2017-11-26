@@ -4,6 +4,7 @@ mod lz4;
 mod place;
 
 pub use self::place::{create_place_file, LuaConfigEntry, LuaConfigValue};
+pub use self::condition::{VerificationRule, VerificationSet};
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub struct RobloxUserID(pub u64);

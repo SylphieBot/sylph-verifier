@@ -14,6 +14,7 @@ lto = true
 
 [dependencies]
 byteorder = "1.1"
+chrono = "0.4"
 constant_time_eq = "0.1"
 diesel = { version = "0.16", features = ["sqlite"] }
 diesel_codegen = { version = "0.16", features = ["sqlite"] }
@@ -24,6 +25,7 @@ hmac = "0.5"
 lazy_static = "0.2"
 libc = "0.2"
 libsqlite3-sys = { version = "0.8", features = ["bundled"] }
+linefeed = { version = "0.3", git = "https://github.com/Lymia/linefeed.git", branch = "concurrent-loggers" }
 log = "0.3"
 lz4-sys = "1.8"
 nom = { version = "3.2", features = ["regexp", "regexp_macros", "verbose-errors"] }

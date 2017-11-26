@@ -79,8 +79,8 @@ fn parse_rblx_container(data: &[u8]) -> Result<RblxData> {
 
     let type_count = cursor.read_u32::<LE>()?;
     let inst_count = cursor.read_u32::<LE>()?;
-    check_unknown_field(&mut cursor);
-    check_unknown_field(&mut cursor);
+    check_unknown_field(&mut cursor)?;
+    check_unknown_field(&mut cursor)?;
 
     let mut entries = Vec::new();
     loop {
@@ -88,7 +88,7 @@ fn parse_rblx_container(data: &[u8]) -> Result<RblxData> {
         if kind != END0_HEADER {
             let compressed_len = cursor.read_u32::<LE>()?;
             let decompressed_len = cursor.read_u32::<LE>()?;
-            check_unknown_field(&mut cursor);
+            check_unknown_field(&mut cursor)?;
             let data = read_cursor_slice(&mut cursor, compressed_len as usize);
             entries.push(RblxEntry { kind, data: RblxCompressed::Compressed {
                 decompressed_len, data
