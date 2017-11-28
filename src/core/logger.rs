@@ -1,8 +1,13 @@
-use chrono::Local;
+use chrono::{Date, Local};
+use errors::*;
 use linefeed::reader::LogSender;
 use log::*;
 use parking_lot::Mutex;
 use std::cmp::max;
+use std::fs;
+use std::fs::{File, OpenOptions};
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering, ATOMIC_BOOL_INIT};
 
 struct AtomicLogLevel(AtomicU8);
@@ -44,7 +49,7 @@ impl AtomicLogLevel {
 }
 
 static LOG_LEVEL_APP: AtomicLogLevel = AtomicLogLevel(AtomicU8::new(AtomicLogLevel::LOG_INFO));
-static LOG_LEVEL_LIB: AtomicLogLevel = AtomicLogLevel(AtomicU8::new(AtomicLogLevel::LOG_WARN));
+static LOG_LEVEL_LIB: AtomicLogLevel = AtomicLogLevel(AtomicU8::new(AtomicLogLevel::LOG_INFO));
 static LOG_LEVEL_FILTER: Mutex<Option<MaxLogLevelFilter>> = Mutex::new(None);
 
 fn update_log_filter_obj() {
@@ -65,11 +70,17 @@ pub fn set_lib_filter_level(level: LogLevelFilter) {
 fn is_app_source(source: &str) -> bool {
     source == "sylph_verifier" || source.starts_with("sylph_verifier::")
 }
+fn check_level(source: &str, level: LogLevel) -> bool {
+    if is_app_source(source) {
+        LOG_LEVEL_APP.logs(level)
+    } else {
+        LOG_LEVEL_LIB.logs(level)
+    }
+}
 
 static LOG_SENDER_EXISTS: AtomicBool = ATOMIC_BOOL_INIT;
 static RAW_LOG_SENDER: Mutex<Option<LogSender>> = Mutex::new(None);
 thread_local!(static LOG_SENDER: LogSender = RAW_LOG_SENDER.lock().as_ref().unwrap().clone());
-
 pub fn set_log_sender(sender: LogSender) {
     {
         let mut cur_sender = RAW_LOG_SENDER.lock();
@@ -81,40 +92,91 @@ pub fn set_log_sender(sender: LogSender) {
     LOG_SENDER_EXISTS.store(true, Ordering::Release)
 }
 
-struct Logger;
-impl Logger {
-    fn check_level(&self, source: &str, level: LogLevel) -> bool {
-        if is_app_source(source) {
-            LOG_LEVEL_APP.logs(level)
-        } else {
-            LOG_LEVEL_LIB.logs(level)
+enum LogFileOutput {
+    NotInitialized, Initialized {
+        out: BufWriter<File>, date: Date<Local>,
+    }
+}
+impl LogFileOutput {
+    fn refresh(&mut self, log_dir: &PathBuf) -> Result<()> {
+        let mut out_path = log_dir.clone();
+        let today = Local::today();
+        out_path.push(format!("{}.log", today.format("%Y-%m-%d")));
+
+        *self = LogFileOutput::Initialized {
+            out: BufWriter::new(OpenOptions::new()
+                .write(true).read(true).append(true).truncate(false).create(true)
+                .open(out_path)?),
+            date: Local::today(),
+        };
+
+        Ok(())
+    }
+    fn check_open_new(&mut self, log_dir: &PathBuf) -> Result<()> {
+        let needs_refresh = match self {
+            &mut LogFileOutput::NotInitialized => true,
+            &mut LogFileOutput::Initialized { ref date, .. } => date != &Local::today(),
+        };
+        if needs_refresh {
+            self.refresh(log_dir)?
         }
+        Ok(())
+    }
+    fn log(&mut self, log_dir: &PathBuf, line: &str) -> Result<()> {
+        self.check_open_new(log_dir)?;
+        if let &mut LogFileOutput::Initialized { ref mut out, .. } = self {
+            writeln!(out, "{}", line)?;
+            out.flush()?;
+            Ok(())
+        } else {
+            unreachable!()
+        }
+    }
+}
+static LOG_FILE: Mutex<LogFileOutput> = Mutex::new(LogFileOutput::NotInitialized);
+
+struct Logger {
+    log_dir: PathBuf,
+}
+fn log_raw(line: &str) {;
+    if LOG_SENDER_EXISTS.load(Ordering::Acquire) {
+        if let Err(_) = LOG_SENDER.with(|s| writeln!(s, "{}", line)) {
+            println!("{}", line);
+        }
+    } else {
+        println!("{}", line);
     }
 }
 impl Log for Logger {
     fn enabled(&self, metadata: &LogMetadata) -> bool {
-        self.check_level(metadata.target(), metadata.level())
+        check_level(metadata.target(), metadata.level())
     }
 
     fn log(&self, record: &LogRecord) {
-        if self.check_level(record.target(), record.level()) {
+        if check_level(record.target(), record.level()) {
             let line = format!("[{}] [{}/{}] {}",
                                Local::now().format("%Y-%m-%d %H:%M:%S"),
                                record.target(), record.level(), record.args());
-            if LOG_SENDER_EXISTS.load(Ordering::Acquire) {
-                if let Err(_) = LOG_SENDER.with(|s| writeln!(s, "{}", line)) {
-                    println!("{}", line);
-                }
-            } else {
-                println!("{}", line);
+            log_raw(&line);
+            if let Err(_) = LOG_FILE.lock().log(&self.log_dir, &line) {
+                log_raw(&format!("[{}] [{}/WARN] WARNING: Failed to log line to disk!",
+                                 Local::now().format("%Y-%m-%d %H:%M:%S"), module_path!()))
             }
         }
     }
 }
 
-pub fn init() {
-    set_logger(|max_log_level| {
+pub fn init<P: AsRef<Path>>(root_path: P) -> Result<()> {
+    let mut log_dir = PathBuf::from(root_path.as_ref());
+    log_dir.push("logs");
+    fs::create_dir_all(&log_dir)?;
+
+    LOG_FILE.lock().log(&log_dir, &format!("===== Starting logging at {} =====",
+                                           Local::now().format("%Y-%m-%d %H:%M:%S")))?;
+    set_logger(move |max_log_level| {
         set_log_filter_obj(max_log_level);
-        box Logger
-    }).expect("failed to init logger!")
+        box Logger { log_dir }
+    }).expect("failed to init logger!");
+
+    Ok(())
 }

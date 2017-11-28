@@ -164,8 +164,8 @@ impl TokenContext {
             }))
         }
     }
-    fn new_in_db_internal(conn: &DatabaseConnection, time_increment: i32,
-                          change_reason_enum: RekeyReason) -> Result<TokenContext> {
+    fn new_in_db(conn: &DatabaseConnection, time_increment: i32,
+                 change_reason_enum: RekeyReason) -> Result<TokenContext> {
         let mut rng = OsRng::new().chain_err(|| "OsRng creation failed")?;
         let mut new_key = [0u8; 64];
         for i in 0..64 {
@@ -181,28 +181,28 @@ impl TokenContext {
 
         Ok(TokenContext::from_db_internal(conn)?.chain_err(|| "Could not get newly created key!")?)
     }
-    pub fn new_in_db(conn: &DatabaseConnection, time_increment: i32) -> Result<TokenContext> {
-        TokenContext::new_in_db_internal(conn, time_increment, RekeyReason::ManualRekey)
+    pub fn rekey(conn: &DatabaseConnection, time_increment: i32) -> Result<TokenContext> {
+        TokenContext::new_in_db(conn, time_increment, RekeyReason::ManualRekey)
     }
     pub fn from_db(conn: &DatabaseConnection, time_increment: i32) -> Result<TokenContext> {
         match TokenContext::from_db_internal(conn)? {
             Some(x) => {
                 if x.current.time_increment != time_increment {
                     info!("Token key in database has a different time increment, regenerating...");
-                    TokenContext::new_in_db_internal(conn, time_increment,
-                                                     RekeyReason::TimeIncrementChanged)
+                    TokenContext::new_in_db(conn, time_increment,
+                                            RekeyReason::TimeIncrementChanged)
                 } else if x.current.version != TOKEN_VERSION {
                     info!("Token key in database is for an older version, regenerating...");
-                    TokenContext::new_in_db_internal(conn, time_increment,
-                                                     RekeyReason::OutdatedVersion)
+                    TokenContext::new_in_db(conn, time_increment,
+                                            RekeyReason::OutdatedVersion)
                 } else {
                     Ok(x)
                 }
             },
             None => {
                 info!("No token keys in database, generating new key...");
-                TokenContext::new_in_db_internal(conn, time_increment,
-                                                 RekeyReason::InitialKey)
+                TokenContext::new_in_db(conn, time_increment,
+                                        RekeyReason::InitialKey)
             },
         }
     }

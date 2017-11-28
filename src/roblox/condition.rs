@@ -222,7 +222,7 @@ enum CacheValue {
 }
 
 struct VerificationContext<'a> {
-    ops: &'a [RuleOp], user_id: RobloxUserID, cache: Vec<Option<CacheValue>>,
+    ops: &'a [RuleOp], user_id: RobloxUserID, cache: Vec<CacheValue>,
     username: Option<String>, dev_trust_level: Option<Option<u32>>,
     badges: Option<HashSet<String>>, player_badges: Option<HashSet<u64>>,
     groups: Option<HashMap<u64, u32>>,

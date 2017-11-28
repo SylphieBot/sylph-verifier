@@ -346,6 +346,7 @@ pub fn create_place_file(overwrite_template: Option<&[u8]>,
     let mut place = parse_rblx_container(place_file)?;
     let mut version_found = false;
     map_string_properties(&mut place, |type_name, obj_name, prop_name, prop_value| {
+        trace!("Place property: {} {}.{} = {}", type_name, obj_name, prop_name, prop_value);
         Ok(match (type_name, obj_name, prop_name) {
             ("ModuleScript", "server_secure_config", "Source") =>
                 Some(make_config(&config, true )?),

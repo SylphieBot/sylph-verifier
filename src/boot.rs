@@ -27,9 +27,6 @@ pub fn start() -> Option<i32> {
     // Setup .env for development builds.
     dotenv::dotenv().ok();
 
-    // Set up custom error handling
-    init_panic_hook();
-
     // Get RUST_BACKTRACE=1 cached by error_chain.
     let original = env::var_os("RUST_BACKTRACE");
     env::set_var("RUST_BACKTRACE", "1");
@@ -66,21 +63,26 @@ pub fn start() -> Option<i32> {
     let joiner = thread::Builder::new().name("debug thread".to_owned()).spawn({
         let core = core.clone();
         move || {
-            let user = RobloxUserID::for_username("Tiffblocks").unwrap();
-            info!("Tiffblocks AAAAAA verify: {:?}", core.check_token(user, "AAAAAA"));
+            core.catch_panic(|| panic!("test")).ok();
+            core.catch_error(|| {
+                let user = RobloxUserID::for_username("Tiffblocks")?;
+                info!("Tiffblocks AAAAAA verify: {:?}", core.check_token(user, "AAAAAA"));
 
-            let users = &[
-                RobloxUserID::for_username("Tiffblocks").unwrap(),
-                RobloxUserID::for_username("Lymeefairy").unwrap(),
-                RobloxUserID::for_username("Lunya").unwrap(),
-                RobloxUserID::for_username("fractality").unwrap(),
-                RobloxUserID::for_username("NowDoTheHarlemShake").unwrap(),
-            ];
-            verification_test(users).unwrap();
+                let users = &[
+                    RobloxUserID::for_username("Tiffblocks")?,
+                    RobloxUserID::for_username("Lymeefairy")?,
+                    RobloxUserID::for_username("Lunya")?,
+                    RobloxUserID::for_username("fractality")?,
+                    RobloxUserID::for_username("NowDoTheHarlemShake")?,
+                ];
+                verification_test(users)?;
 
-            use std::io::Write;
-            let place_data = create_place_file(None, core.place_config()).unwrap();
-            ::std::fs::File::create("test.rbxl").unwrap().write(&place_data).unwrap();
+                use std::io::Write;
+                let place_data = create_place_file(None, core.place_config())?;
+                ::std::fs::File::create("test.rbxl")?.write(&place_data)?;
+
+                Ok(())
+            }).ok();
         }
     }).unwrap();
 
