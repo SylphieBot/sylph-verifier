@@ -2,8 +2,16 @@ use errors::*;
 use nom::IResult;
 use roblox::{api, RobloxUserID};
 use std::collections::{HashSet, HashMap};
+use std::mem;
+use std::panic;
+use std::ptr;
+use std::process::abort;
+
+// TODO: Review and possibly rewrite this module to deal with malicious role conditions.
+// TODO: Main risk is DoS via stack overflow.
 
 const DEFAULT_CONDITION_STRS: &'static [(&'static str, &'static str)] = &[
+    ("Verified", "true"),
     ("FormerBC", "builtin_role(NotBC) and badge(Welcome To The Club)"),
     ("NotBC", "not builtin_role(BC) and not builtin_role(TBC) and not builtin_role(OBC)"),
     ("BC", "badge(Builders Club)"),
@@ -29,6 +37,16 @@ lazy_static!(
     };
 );
 
+fn replace_map<T, F: FnOnce(T) -> T>(t: &mut T, f: F) {
+    unsafe {
+        let t = t as *mut T;
+        ptr::write(t, match panic::catch_unwind(panic::AssertUnwindSafe(|| f(ptr::read(t)))) {
+            Ok(t) => t,
+            Err(_) => abort(),
+        })
+    }
+}
+
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 enum RuleAST<'a> {
     Literal(bool),
@@ -37,28 +55,80 @@ enum RuleAST<'a> {
     And(Box<RuleAST<'a>>, Box<RuleAST<'a>>),
     Not(Box<RuleAST<'a>>),
 }
+impl <'a> RuleAST<'a> {
+    fn simplify(mut self) -> Self {
+        // Simplify child terms first.
+        match self {
+            RuleAST::And(box ref mut a, box ref mut b) => {
+                replace_map(a, |x| x.simplify());
+                replace_map(b, |x| x.simplify());
+            }
+            RuleAST::Or(box ref mut a, box ref mut b) => {
+                replace_map(a, |x| x.simplify());
+                replace_map(b, |x| x.simplify());
+            }
+            RuleAST::Not(box ref mut a) => {
+                replace_map(a, |x| x.simplify());
+            }
+            _ => { }
+        }
+
+        // Peephole optimizations
+        match self {
+            // Constant propergation
+            RuleAST::And(box RuleAST::Literal(a), box RuleAST::Literal(b)) =>
+                RuleAST::Literal(a || b),
+            RuleAST::Or(box RuleAST::Literal(a), box RuleAST::Literal(b)) =>
+                RuleAST::Literal(a || b),
+            RuleAST::Not(box RuleAST::Literal(a)) =>
+                RuleAST::Literal(!a),
+            RuleAST::And(box RuleAST::Literal(false), _) |
+            RuleAST::And(_, box RuleAST::Literal(false)) =>
+                RuleAST::Literal(false),
+            RuleAST::Or(box RuleAST::Literal(true), _) |
+            RuleAST::Or(_, box RuleAST::Literal(true)) =>
+                RuleAST::Literal(true),
+            // Remove redundant expressions
+            RuleAST::And(box RuleAST::Literal(true), box a) |
+            RuleAST::And(box a, box RuleAST::Literal(true)) |
+            RuleAST::Or(box RuleAST::Literal(false), box a) |
+            RuleAST::Or(box a, box RuleAST::Literal(false)) |
+            RuleAST::Not(box RuleAST::Not(box a)) =>
+                a,
+            // De Morgan's laws
+            RuleAST::And(box RuleAST::Not(a), box RuleAST::Not(b)) =>
+                RuleAST::Not(box RuleAST::Or(a, b)),
+            RuleAST::Or(box RuleAST::Not(a), box RuleAST::Not(b)) =>
+                RuleAST::Not(box RuleAST::And(a, b)),
+            x => x,
+        }
+    }
+}
 
 named!(ident(&str) -> &str, re_find_static!("^[_A-Za-z][_A-Za-z0-9]*"));
 named!(term_contents(&str) -> &str, re_find_static!("^[^()]*"));
+macro_rules! ident {
+    ($i:expr, $a:expr) => { map_opt!($i, ident, |x| if x == $a { Some(x) } else { None }) }
+}
 
 named!(expr_0(&str) -> RuleAST, ws!(alt_complete!(
     delimited!(tag_s!("("), expr, tag_s!(")")) |
-    map!(tag_s!("true"), |_| RuleAST::Literal(true)) |
-    map!(tag_s!("false"), |_| RuleAST::Literal(false)) |
+    map!(ident!("true"), |_| RuleAST::Literal(true)) |
+    map!(ident!("false"), |_| RuleAST::Literal(false)) |
     map!(ws!(tuple!(ident, delimited!(tag_s!("("), term_contents, tag_s!(")")))),
          |t| RuleAST::Term(t.0, t.1.trim()))
 )));
 named!(expr_1(&str) -> RuleAST, ws!(alt_complete!(
-    map!(preceded!(tag_s!("not"), expr_1), |t| RuleAST::Not(box t)) |
+    map!(preceded!(ident!("not"), expr_1), |t| RuleAST::Not(box t)) |
     expr_0
 )));
 named!(expr_2(&str) -> RuleAST, ws!(alt_complete!(
-    map!(tuple!(expr_1, preceded!(tag_s!("or"), expr_2)),
+    map!(tuple!(expr_1, preceded!(ident!("or"), expr_2)),
          |t| RuleAST::Or(box t.0, box t.1)) |
     expr_1
 )));
 named!(expr(&str) -> RuleAST, ws!(alt_complete!(
-    map!(tuple!(expr_2, preceded!(tag_s!("and"), expr)),
+    map!(tuple!(expr_2, preceded!(ident!("and"), expr)),
          |t| RuleAST::And(box t.0, box t.1)) |
     expr_2
 )));
@@ -77,7 +147,8 @@ fn check_iresult<T>(result: IResult<&str, T>) -> Result<T> {
 pub struct VerificationRule<'a>(RuleAST<'a>);
 impl <'a> VerificationRule<'a> {
     pub fn from_str(rule: &str) -> Result<VerificationRule> {
-        Ok(VerificationRule(check_iresult(expr(rule))?))
+        ensure!(rule.len() < 500, "Verification rule cannot be over 500 characters.");
+        Ok(VerificationRule(check_iresult(expr(rule))?.simplify()))
     }
 }
 
@@ -216,23 +287,16 @@ fn option_cache<T, F>(opt: &mut Option<T>, f: F) -> Result<&T> where F: FnOnce()
     if let &mut Some(ref t) = opt { Ok(t) } else { unreachable!() }
 }
 
-#[derive(Copy, Clone)]
-enum CacheValue {
-    False, True, NoData,
-}
-
 struct VerificationContext<'a> {
-    ops: &'a [RuleOp], user_id: RobloxUserID, cache: Vec<CacheValue>,
+    ops: &'a [RuleOp], user_id: RobloxUserID, cache: Vec<Option<bool>>,
     username: Option<String>, dev_trust_level: Option<Option<u32>>,
-    badges: Option<HashSet<String>>, player_badges: Option<HashSet<u64>>,
-    groups: Option<HashMap<u64, u32>>,
+    badges: Option<HashSet<String>>, groups: Option<HashMap<u64, u32>>,
 }
 impl <'a> VerificationContext<'a> {
     fn new(ops: &'a [RuleOp], user_id: RobloxUserID) -> VerificationContext {
         VerificationContext {
-            ops, user_id, cache: vec![CacheValue::NoData; ops.len()],
-            username: None, dev_trust_level: None,
-            badges: None, player_badges: None, groups: None,
+            ops, user_id, cache: vec![None; ops.len()],
+            username: None, dev_trust_level: None, badges: None, groups: None,
         }
     }
 
@@ -250,10 +314,6 @@ impl <'a> VerificationContext<'a> {
         let id = self.user_id;
         option_cache(&mut self.badges, || api::get_roblox_badges(id))
     }
-    fn player_badges(&mut self) -> Result<&HashSet<u64>> {
-        let id = self.user_id;
-        option_cache(&mut self.player_badges, || api::get_player_badges(id))
-    }
     fn groups(&mut self) -> Result<&HashMap<u64, u32>> {
         let id = self.user_id;
         option_cache(&mut self.groups, || api::get_player_groups(id))
@@ -261,12 +321,13 @@ impl <'a> VerificationContext<'a> {
 
     fn eval(&mut self, i: usize) -> Result<bool> {
         match self.cache[i] {
-            CacheValue::NoData => {
+            Some(b) => Ok(b),
+            None => {
                 let op = &self.ops[i];
                 let new = match op {
                     &RuleOp::Literal(b) => b,
                     &RuleOp::CheckBadge(ref name) => self.badges()?.contains(name),
-                    &RuleOp::CheckPlayerBadge(id) => self.player_badges()?.contains(&id),
+                    &RuleOp::CheckPlayerBadge(id) => api::has_player_badge(self.user_id, id)?,
                     &RuleOp::CheckOwnsAsset(asset) => api::owns_asset(self.user_id, asset)?,
                     &RuleOp::CheckInGroup(group, None) => self.groups()?.contains_key(&group),
                     &RuleOp::CheckInGroup(group, Some(check)) => match self.groups()?.get(&group) {
@@ -281,11 +342,9 @@ impl <'a> VerificationContext<'a> {
                     &RuleOp::Or(a, b) => self.eval(a)? || self.eval(b)?,
                     &RuleOp::And(a, b) => self.eval(a)? && self.eval(b)?,
                 };
-                self.cache[i] = if new { CacheValue::True } else { CacheValue::False };
+                self.cache[i] = Some(new);
                 Ok(new)
             }
-            CacheValue::True => Ok(true),
-            CacheValue::False => Ok(false),
         }
     }
 }

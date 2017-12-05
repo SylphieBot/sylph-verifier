@@ -1,12 +1,12 @@
+CREATE TABLE global_config (
+  key TEXT PRIMARY KEY NOT NULL, value BLOB
+) WITHOUT ROWID;
+
 CREATE TABLE roblox_verification_keys (
   id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-  key TEXT NOT NULL, time_increment INT NOT NULL CHECK (time_increment > 0),
+  key BLOB NOT NULL, time_increment INT NOT NULL CHECK (time_increment > 0),
   version INT NOT NULL, change_reason TEXT NOT NULL
 );
-
-CREATE TABLE roblox_verification_cooldown (
-  discord_user_id BIGINT PRIMARY KEY NOT NULL, last_command_use TIMESTAMP NOT NULL, times_used INT NOT NULL
-) WITHOUT ROWID;
 
 CREATE TABLE roblox_verification (
   discord_user_id BIGINT UNIQUE NOT NULL, roblox_user_id BIGINT UNIQUE NOT NULL,
@@ -27,6 +27,11 @@ CREATE TABLE discord_active_roles (
   PRIMARY KEY (discord_guild_id, role_name)
 ) WITHOUT ROWID;
 
-CREATE TABLE console_history (
+CREATE TABLE discord_command_cooldown (
+  discord_user_id BIGINT PRIMARY KEY NOT NULL, command TEXT NOT NULL,
+  last_command_use TIMESTAMP NOT NULL, times_used INT NOT NULL
+) WITHOUT ROWID;
+
+CREATE TABLE terminal_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, text TEXT NOT NULL
 );

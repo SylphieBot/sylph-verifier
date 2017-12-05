@@ -1,6 +1,7 @@
 #![warn(unused_extern_crates)]
 #![recursion_limit="128"]
-#![feature(box_syntax, box_patterns, never_type, integer_atomics, const_atomic_u8_new)]
+#![feature(box_syntax, box_patterns, never_type, integer_atomics,
+           const_fn, const_atomic_u8_new, const_atomic_bool_new, const_atomic_usize_new)]
 
 extern crate byteorder;
 extern crate chrono;
@@ -15,32 +16,34 @@ extern crate r2d2;
 extern crate rand;
 extern crate regex;
 extern crate reqwest;
+extern crate rmp_serde;
 extern crate serde_json;
+extern crate serenity;
 extern crate sha2;
 extern crate uuid;
 
 #[allow(unused_extern_crates)] extern crate serde;
 
 #[macro_use] extern crate diesel;
-#[macro_use] extern crate diesel_codegen;
+#[macro_use] extern crate diesel_derives;
+#[macro_use] extern crate diesel_infer_schema;
+#[macro_use] extern crate diesel_migrations;
+#[macro_use] extern crate enumset;
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
 #[macro_use] extern crate nom;
 #[macro_use] extern crate serde_derive;
-#[macro_use] extern crate serenity;
 
 mod boot;
+mod commands;
 mod core;
-mod discord;
 mod errors;
 mod roblox;
 
 fn main() {
-    match boot::start() {
-        Some(ret) => ::std::process::exit(ret),
-        None => loop {
-            ::std::thread::sleep(::std::time::Duration::from_secs(60))
-        },
-    }
+    println!("Sylph-Verifier v{} by LymeeFairy", env!("CARGO_PKG_VERSION"));
+    println!("Licenced under the Apache license, version 2.0");
+    println!();
+    boot::start();
 }

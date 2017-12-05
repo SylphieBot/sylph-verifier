@@ -6,19 +6,23 @@ mod internal {
         foreign_links {
             Diesel(diesel::result::Error);
             Diesel_ConnectionError(diesel::result::ConnectionError);
+            Diesel_RunMigrationsError(diesel_migrations::RunMigrationsError);
             Fmt(std::fmt::Error);
             Io(std::io::Error);
-            R2D2_GetTimeout(r2d2::GetTimeout);
-            R2D2_InitializationError(r2d2::InitializationError);
-            R2D2_RunMigrationsError(diesel::migrations::RunMigrationsError);
+            R2D2(r2d2::Error);
             Reqwest(reqwest::Error);
             SerdeJson(serde_json::Error);
+            Serenity(serenity::Error);
             Str_Utf8Error(std::str::Utf8Error);
             String_FromUtf8Error(std::string::FromUtf8Error);
             SystemTimeError(std::time::SystemTimeError);
         }
 
         errors {
+            CommandAborted {
+                description("command aborted")
+            }
+
             InvalidToken {
                 description("token must be six upper case letters")
             }
@@ -35,3 +39,4 @@ mod internal {
 }
 // Reexport these types so IDEs pick up on them correctly.
 pub use self::internal::{Error, ErrorKind, Result, ResultExt};
+

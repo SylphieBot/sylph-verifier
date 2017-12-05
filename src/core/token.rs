@@ -11,9 +11,6 @@ use std::fmt::{Display, Formatter, Write, Result as FmtResult};
 use std::time::*;
 
 const TOKEN_CHARS: &'static [u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const KEY_CHARS: &'static [u8] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 \
-      `~!@#$%^&*()-=_+[]\\{}|;':\",./<>?";
 const TOKEN_VERSION: i32 = 1;
 const HISTORY_COUNT: i64 = 5;
 
@@ -81,16 +78,16 @@ impl RekeyReason {
 #[derive(Insertable)]
 #[table_name="roblox_verification_keys"]
 struct NewTokenContext<'a> {
-    key: &'a str, time_increment: i32, version: i32, change_reason: String,
+    key: &'a [u8], time_increment: i32, version: i32, change_reason: String,
 }
 
 #[derive(Queryable)]
 struct DatabaseTokenContext {
-    _id: i32, key: String, time_increment: i32, version: i32, change_reason: String,
+    _id: i32, key: Vec<u8>, time_increment: i32, version: i32, change_reason: String,
 }
 
 struct TokenParameters {
-    key: String, time_increment: i32, version: i32, change_reason: RekeyReason,
+    key: Vec<u8>, time_increment: i32, version: i32, change_reason: RekeyReason,
 }
 impl TokenParameters {
     fn from_db_obj(ctx: DatabaseTokenContext) -> TokenParameters {
@@ -106,7 +103,7 @@ impl TokenParameters {
     }
 
     fn sha256_token(&self, data: &str) -> Token {
-        let mut mac = Hmac::<Sha256>::new(self.key.as_bytes()).unwrap();
+        let mut mac = Hmac::<Sha256>::new(&self.key).unwrap();
         mac.input(data.as_bytes());
         let result = mac.result();
         let code = result.code();
@@ -167,21 +164,25 @@ impl TokenContext {
     fn new_in_db(conn: &DatabaseConnection, time_increment: i32,
                  change_reason_enum: RekeyReason) -> Result<TokenContext> {
         let mut rng = OsRng::new().chain_err(|| "OsRng creation failed")?;
-        let mut new_key = [0u8; 64];
-        for i in 0..64 {
-            new_key[i] = *rng.choose(KEY_CHARS).unwrap();
+        let mut key = Vec::new();
+        for _ in 0..16 {
+            let r = rng.next_u32();
+            key.push((r >>  0) as u8);
+            key.push((r >>  8) as u8);
+            key.push((r >> 16) as u8);
+            key.push((r >> 24) as u8);
         }
-        let key = ::std::str::from_utf8(&new_key)?;
         let version = TOKEN_VERSION;
 
         let change_reason = change_reason_enum.into_str();
-        ::diesel::insert(&NewTokenContext { key, time_increment, version, change_reason })
-            .into(roblox_verification_keys::table)
+        ::diesel::insert_into(roblox_verification_keys::table)
+            .values(&NewTokenContext { key: &key, time_increment, version, change_reason })
             .execute(conn.deref())?;
 
         Ok(TokenContext::from_db_internal(conn)?.chain_err(|| "Could not get newly created key!")?)
     }
     pub fn rekey(conn: &DatabaseConnection, time_increment: i32) -> Result<TokenContext> {
+        info!("Regenerating token key due to user request.");
         TokenContext::new_in_db(conn, time_increment, RekeyReason::ManualRekey)
     }
     pub fn from_db(conn: &DatabaseConnection, time_increment: i32) -> Result<TokenContext> {

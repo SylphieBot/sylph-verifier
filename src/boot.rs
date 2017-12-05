@@ -4,14 +4,13 @@ use errors::*;
 use roblox::*;
 use std::env;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::thread;
 
 fn verification_test(ids: &[RobloxUserID]) -> Result<()> {
     let rules = VerificationSet::compile(
-        &["FormerBC", "NotBC", "BC", "TBC", "OBC", "DevForum", "RobloxAdmin",
-          "FormerAccelerator", "FormerIncubator", "FormerIntern", "Accelerator",
-          "Incubator", "Intern"],
+        &["Verified", "FormerBC", "NotBC", "BC", "TBC", "OBC", "DevForum",
+          "RobloxAdmin", "FormerAccelerator", "FormerIncubator", "FormerIntern",
+          "Accelerator", "Incubator", "Intern"],
         ::std::collections::HashMap::new())?;
     info!("{:#?}", rules);
     for &id in ids {
@@ -23,7 +22,7 @@ fn verification_test(ids: &[RobloxUserID]) -> Result<()> {
     }
     Ok(())
 }
-pub fn start() -> Option<i32> {
+pub fn start() {
     // Setup .env for development builds.
     dotenv::dotenv().ok();
 
@@ -56,7 +55,7 @@ pub fn start() -> Option<i32> {
     };
 
     // Init core
-    let core = Arc::new(VerifierCore::new(root_path, db_path).expect("failed to initialize core"));
+    let core = VerifierCore::new(root_path, db_path).expect("failed to initialize core");
 
     // TODO: Debug
     info!("Log before terminal.");
@@ -87,5 +86,5 @@ pub fn start() -> Option<i32> {
     }).unwrap();
 
     // Setup terminal
-    core.run_terminal().unwrap()
+    core.start().unwrap();
 }

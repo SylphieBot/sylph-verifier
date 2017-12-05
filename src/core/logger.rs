@@ -8,7 +8,7 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering, ATOMIC_BOOL_INIT};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 struct AtomicLogLevel(AtomicU8);
 impl AtomicLogLevel {
@@ -67,8 +67,16 @@ pub fn set_lib_filter_level(level: LogLevelFilter) {
     LOG_LEVEL_LIB.store(level);
     update_log_filter_obj();
 }
+const MODULE_PATH_INIT: &'static str = "sylph_verifier::";
 fn is_app_source(source: &str) -> bool {
-    source == "sylph_verifier" || source.starts_with("sylph_verifier::")
+    source == "sylph_verifier" || source.starts_with(MODULE_PATH_INIT)
+}
+fn munge_target(target: &str) -> &str {
+    if target.starts_with(MODULE_PATH_INIT) {
+        &target[MODULE_PATH_INIT.len()..]
+    } else {
+        target
+    }
 }
 fn check_level(source: &str, level: LogLevel) -> bool {
     if is_app_source(source) {
@@ -78,18 +86,13 @@ fn check_level(source: &str, level: LogLevel) -> bool {
     }
 }
 
-static LOG_SENDER_EXISTS: AtomicBool = ATOMIC_BOOL_INIT;
-static RAW_LOG_SENDER: Mutex<Option<LogSender>> = Mutex::new(None);
-thread_local!(static LOG_SENDER: LogSender = RAW_LOG_SENDER.lock().as_ref().unwrap().clone());
+static LOG_SENDER: Mutex<Option<LogSender>> = Mutex::new(None);
 pub fn set_log_sender(sender: LogSender) {
-    {
-        let mut cur_sender = RAW_LOG_SENDER.lock();
-        if cur_sender.is_some() {
-            panic!("Attempted to set log sender twice!")
-        }
-        *cur_sender = Some(sender);
+    let mut cur_sender = LOG_SENDER.lock();
+    if cur_sender.is_some() {
+        panic!("Attempted to set log sender twice!")
     }
-    LOG_SENDER_EXISTS.store(true, Ordering::Release)
+    *cur_sender = Some(sender);
 }
 
 enum LogFileOutput {
@@ -138,13 +141,12 @@ static LOG_FILE: Mutex<LogFileOutput> = Mutex::new(LogFileOutput::NotInitialized
 struct Logger {
     log_dir: PathBuf,
 }
-fn log_raw(line: &str) {;
-    if LOG_SENDER_EXISTS.load(Ordering::Acquire) {
-        if let Err(_) = LOG_SENDER.with(|s| writeln!(s, "{}", line)) {
+fn log_raw(line: &str) {
+    match LOG_SENDER.lock().as_ref() {
+        Some(sender) => if let Err(_) = writeln!(sender, "{}", line) {
             println!("{}", line);
         }
-    } else {
-        println!("{}", line);
+        None => println!("{}", line),
     }
 }
 impl Log for Logger {
@@ -154,13 +156,17 @@ impl Log for Logger {
 
     fn log(&self, record: &LogRecord) {
         if check_level(record.target(), record.level()) {
-            let line = format!("[{}] [{}/{}] {}",
-                               Local::now().format("%Y-%m-%d %H:%M:%S"),
-                               record.target(), record.level(), record.args());
+            let now = Local::now().format("%Y-%m-%d %H:%M:%S");
+            let line = if record.target() == "$raw" {
+                format!("[{}] {}", now, record.args())
+            } else {
+                format!("[{}] [{}/{}] {}",
+                        now, munge_target(record.target()), record.level(), record.args())
+            };
             log_raw(&line);
             if let Err(_) = LOG_FILE.lock().log(&self.log_dir, &line) {
-                log_raw(&format!("[{}] [{}/WARN] WARNING: Failed to log line to disk!",
-                                 Local::now().format("%Y-%m-%d %H:%M:%S"), module_path!()))
+                log_raw(&format!("[{}] [{}/WARN] Failed to log line to disk!",
+                                 now, munge_target(module_path!())))
             }
         }
     }

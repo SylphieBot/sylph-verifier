@@ -32,17 +32,6 @@ struct RobloxBadgesLookup {
 }
 
 #[derive(Deserialize)]
-struct RobloxPlayerBadgeLookup {
-    #[serde(rename = "BadgeAssetId")] id: u64,
-}
-
-#[derive(Deserialize)]
-struct RobloxPlayerBadgesLookup {
-    #[serde(rename = "Total")] total: u64,
-    #[serde(rename = "PlayerBadges")] badges: Vec<RobloxPlayerBadgeLookup>,
-}
-
-#[derive(Deserialize)]
 struct RobloxGroupLookup {
     #[serde(rename = "Id")] id: u64,
     #[serde(rename = "Rank")] rank: u32,
@@ -89,15 +78,10 @@ pub fn get_roblox_badges(id: RobloxUserID) -> Result<HashSet<String>> {
     Ok(badges.badges.into_iter().map(|x| x.name).collect())
 }
 
-fn get_player_badges_raw(id: RobloxUserID, limit: u64) -> Result<RobloxPlayerBadgesLookup> {
-    let uri = format!("https://www.roblox.com/badges/player?userId={}&MaxRows={}", id.0, limit);
-    let json = reqwest::get(&uri)?.error_for_status()?.text()?;
-    Ok(serde_json::from_str::<RobloxPlayerBadgesLookup>(&json)?)
-}
-pub fn get_player_badges(id: RobloxUserID) -> Result<HashSet<u64>> {
-    let total = get_player_badges_raw(id, 0)?.total;
-    let badges = get_player_badges_raw(id, total)?;
-    Ok(badges.badges.into_iter().map(|x| x.id).collect())
+pub fn has_player_badge(id: RobloxUserID, asset: u64) -> Result<bool> {
+    let uri = format!("https://assetgame.roblox.com/Game/Badge/HasBadge.ashx?UserID={}&BadgeID={}",
+                      id.0, asset);
+    Ok(reqwest::get(&uri)?.error_for_status()?.text()? == "Success")
 }
 
 pub fn get_player_groups(id: RobloxUserID) -> Result<HashMap<u64, u32>> {

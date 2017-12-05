@@ -228,11 +228,19 @@ fn write_rblx_container<W: Write>(w: &mut W, rblx: &RblxData) -> Result<()> {
 
 #[derive(Clone, Debug)]
 pub enum LuaConfigValue<'a> {
-    String(Cow<'a, str>), Double(f64), Nil,
+    Binary(Cow<'a, [u8]>), String(Cow<'a, str>), Double(f64), Nil,
 }
 impl <'a> Display for LuaConfigValue<'a> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
+            &LuaConfigValue::Binary(ref b) => {
+                write!(f, "\"")?;
+                for byte in b.iter() {
+                    write!(f, "\\{}", byte)?;
+                }
+                write!(f, "\"")?;
+                Ok(())
+            }
             &LuaConfigValue::String(ref s) => write!(f, "[[{}]]", s.replace("]", "]]..']'..[[")),
             &LuaConfigValue::Double(val) => val.fmt(f),
             &LuaConfigValue::Nil => f.write_str("nil"),
@@ -252,6 +260,21 @@ impl <'a> From<&'a String> for LuaConfigValue<'a> {
 impl <'a> From<String> for LuaConfigValue<'a> {
     fn from(s: String) -> Self {
         LuaConfigValue::String(Cow::from(s))
+    }
+}
+impl <'a> From<&'a [u8]> for LuaConfigValue<'a> {
+    fn from(b: &'a [u8]) -> Self {
+        LuaConfigValue::Binary(Cow::from(b))
+    }
+}
+impl <'a> From<&'a Vec<u8>> for LuaConfigValue<'a> {
+    fn from(b: &'a Vec<u8>) -> Self {
+        LuaConfigValue::Binary(Cow::from(b.as_ref()))
+    }
+}
+impl <'a> From<Vec<u8>> for LuaConfigValue<'a> {
+    fn from(b: Vec<u8>) -> Self {
+        LuaConfigValue::Binary(Cow::from(b))
     }
 }
 impl <'a> From<i8> for LuaConfigValue<'a> {

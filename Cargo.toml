@@ -16,13 +16,16 @@ lto = true
 byteorder = "1.1"
 chrono = "0.4"
 constant_time_eq = "0.1"
-diesel = { version = "0.16", features = ["sqlite"] }
-diesel_codegen = { version = "0.16", features = ["sqlite"] }
+diesel = { version = "0.99", features = ["sqlite"] }
+diesel_derives = { version = "0.99", features = ["sqlite"] }
+diesel_infer_schema = { version = "0.99", features = ["sqlite"] }
+diesel_migrations = { version = "0.99", features = ["sqlite"] }
 dotenv = "0.10"
+enumset = { version = "0.3", features = ["nightly"] }
 error-chain = { version = "0.11", git = "https://github.com/Lymia/error-chain.git", branch = "optimize-for-size" }
 fs2 = "0.4"
 hmac = "0.5"
-lazy_static = "0.2"
+lazy_static = "1.0"
 libc = "0.2"
 libsqlite3-sys = { version = "0.8", features = ["bundled"] }
 linefeed = { version = "0.3", git = "https://github.com/Lymia/linefeed.git", branch = "concurrent-loggers" }
@@ -31,14 +34,15 @@ lz4-sys = "1.8"
 nom = { version = "3.2", features = ["regexp", "regexp_macros", "verbose-errors"] }
 parking_lot = { version = "0.5", features = ["nightly"] }
 percent-encoding = "1.0"
-r2d2 = "0.7"
+r2d2 = "0.8"
 rand = "0.3"
 regex = "0.2"
 reqwest = "0.8"
+rmp-serde = "0.13"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
-serenity = "0.4"
+serenity = { version = "0.5", git = "https://github.com/zeyla/serenity.git", branch = "v0.5.0" }
 sha2 = "0.7"
 uuid = { version = "0.5", features = ["v4"] }
 

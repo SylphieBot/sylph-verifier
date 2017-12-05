@@ -11,7 +11,7 @@ use std::io::{Write as IoWrite};
 use std::mem::replace;
 use std::panic::*;
 use std::path::{Path, PathBuf};
-use std::process::exit;
+use std::process::abort;
 use std::thread;
 
 fn make_backtrace_str(backtrace: Option<&Backtrace>) -> String {
@@ -65,6 +65,7 @@ fn cause_from_panic(thread_name: &str, info: &(Any + Send), loc: Option<&Locatio
     format!("Thread '{}' panicked with '{}'{}", thread_name, raw_cause, raw_location)
 }
 
+#[derive(Debug)]
 enum PanicInfoStatus {
     DefaultMode, PanicReady, Error(String, Error), PanicInfo(String, Backtrace),
 }
@@ -86,11 +87,10 @@ pub fn init_panic_hook() {
                     let cause = cause_from_panic(&thread_name(),
                                                  panic_info.payload(), panic_info.location());
                     *info = PanicInfoStatus::PanicInfo(cause, Backtrace::new());
-                    resume_unwind(box "panic!() called")
                 }
                 &PanicInfoStatus::DefaultMode => default_hook(panic_info),
             }
-        })
+        });
     }))
 }
 
@@ -108,7 +108,7 @@ fn write_error_report<P: AsRef<Path>>(root_path: P, kind: &str, report: &str) ->
 
 fn internal_fatal_error(err: &str) -> ! {
     eprintln!("{}", err);
-    exit(1)
+    abort()
 }
 
 struct PanicInfo {

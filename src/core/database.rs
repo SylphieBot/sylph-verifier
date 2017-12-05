@@ -2,7 +2,7 @@ use diesel::connection::Connection;
 use diesel::sqlite::SqliteConnection;
 use errors::*;
 use percent_encoding::{utf8_percent_encode, DEFAULT_ENCODE_SET};
-use r2d2::*;
+use r2d2::{Pool, ManageConnection, PooledConnection};
 use std::ops::{Deref, DerefMut};
 use std::path::*;
 use std::time::Duration;
@@ -72,11 +72,10 @@ pub struct Database {
 impl Database {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Database> {
         let path = path.as_ref();
-        let config = Config::builder()
-            .pool_size(15)
+        let pool = Pool::builder()
+            .max_size(15)
             .idle_timeout(Some(Duration::from_secs(60 * 5)))
-            .build();
-        let pool = Pool::new(config, ConnectionManager::new(path)?)?;
+            .build(ConnectionManager::new(path)?)?;
 
         let database = Database { pool };
         database.init_db()?;
