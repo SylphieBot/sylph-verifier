@@ -16,7 +16,6 @@ extern crate r2d2;
 extern crate rand;
 extern crate regex;
 extern crate reqwest;
-extern crate rmp_serde;
 extern crate serde_json;
 extern crate serenity;
 extern crate sha2;

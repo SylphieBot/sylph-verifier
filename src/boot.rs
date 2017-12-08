@@ -64,9 +64,6 @@ pub fn start() {
         move || {
             core.catch_panic(|| panic!("test")).ok();
             core.catch_error(|| {
-                let user = RobloxUserID::for_username("Tiffblocks")?;
-                info!("Tiffblocks AAAAAA verify: {:?}", core.check_token(user, "AAAAAA"));
-
                 let users = &[
                     RobloxUserID::for_username("Tiffblocks")?,
                     RobloxUserID::for_username("Lymeefairy")?,

@@ -14,7 +14,7 @@ lto = true
 
 [dependencies]
 byteorder = "1.1"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 constant_time_eq = "0.1"
 diesel = { version = "0.99", features = ["sqlite"] }
 diesel_derives = { version = "0.99", features = ["sqlite"] }
@@ -38,7 +38,6 @@ r2d2 = "0.8"
 rand = "0.3"
 regex = "0.2"
 reqwest = "0.8"
-rmp-serde = "0.13"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"

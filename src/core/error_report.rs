@@ -49,7 +49,7 @@ fn cause_from_error<E: ChainedError>(thread_name: &str, e: &E) -> Result<String>
     for e in e.iter().skip(1) {
         writeln!(buf, "Caused by: {}", e)?;
     }
-    Ok(buf)
+    Ok(buf.trim().to_string())
 }
 fn cause_from_panic(thread_name: &str, info: &(Any + Send), loc: Option<&Location>) -> String {
     let raw_cause: Cow<'static, str> = if let Some(&s) = info.downcast_ref::<&str>() {

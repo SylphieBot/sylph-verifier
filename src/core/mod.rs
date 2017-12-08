@@ -4,6 +4,10 @@ use linefeed::reader::LogSender;
 use log::LogLevelFilter;
 use parking_lot::*;
 use roblox::*;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serenity::model::GuildId;
+use std::any::Any;
 use std::fs::{File, OpenOptions};
 use std::panic::*;
 use std::path::{Path, PathBuf};
@@ -12,18 +16,21 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-mod database;
+#[macro_use] mod database;
+
+mod config;
 mod discord;
 mod error_report;
 mod logger;
 mod terminal;
-mod token;
+mod verifier;
 
+pub use self::config::{ConfigKey, ConfigKeys};
 pub use self::database::{DatabaseConnection, schema};
-pub use self::token::{TokenStatus, RekeyReason};
+pub use self::verifier::{Verifier, TokenStatus, RekeyReason};
 
+use self::config::ConfigManager;
 use self::database::Database;
-use self::token::TokenContext;
 
 const LOCK_FILE_NAME: &'static str = "Sylph-Verifier.lock";
 const DB_FILE_NAME: &'static str = "Sylph-Verifier.db";
@@ -52,7 +59,7 @@ const STATUS_UNINIT  : u8 = 4;
 
 struct VerifierCoreData {
     root_path: PathBuf, shutdown_sender: Mutex<Option<LogSender>>, status: AtomicU8,
-    _lock: File, database: database::Database, token_context: RwLock<TokenContext>,
+    _lock: File, database: database::Database, verifier: Verifier, config: ConfigManager,
 }
 
 #[derive(Clone)]
@@ -77,11 +84,11 @@ impl VerifierCore {
                 }
             };
             let database = Database::new(db_path)?;
-            let token_context = RwLock::new(TokenContext::from_db(&database.connect()?, 300)?);
+            let verifier = Verifier::new(database.clone())?;
             Ok(VerifierCore(Arc::new(VerifierCoreData {
                 root_path: root_path.to_owned(), shutdown_sender: Mutex::new(None),
                 status: AtomicU8::new(STATUS_NOT_INIT),
-                _lock: lock, database, token_context
+                _lock: lock, database, verifier, config: ConfigManager::new(),
             })))
         })?)
     }
@@ -135,16 +142,24 @@ impl VerifierCore {
         self.0.status.load(Ordering::Relaxed) == STATUS_RUNNING
     }
 
-    pub fn check_token(&self, user: RobloxUserID, token: &str) -> Result<TokenStatus> {
-        self.0.token_context.read().check_token(user, token)
+    pub fn get_verifier(&self) -> &Verifier {
+        &self.0.verifier
     }
-    pub fn rekey(&self) -> Result<()> {
-        let db = self.0.database.connect()?;
-        db.transaction(|| {
-            let mut token_context = self.0.token_context.write();
-            *token_context = TokenContext::rekey(&db, 300)?;
-            Ok(())
-        })
+
+    pub fn set_config<T: Serialize + DeserializeOwned + Clone + Any + Send + Sync + 'static>(
+        &self, guild: Option<GuildId>, key: ConfigKey<T>, value: T
+    ) -> Result<()> {
+        self.0.config.set(&self.0.database.connect()?, guild, key, value)
+    }
+    pub fn reset_config<T: Serialize + DeserializeOwned + Clone + Any + Send + Sync + 'static>(
+        &self, guild: Option<GuildId>, key: ConfigKey<T>
+    ) -> Result<()> {
+        self.0.config.reset(&self.0.database.connect()?, guild, key)
+    }
+    pub fn get_config<T: Serialize + DeserializeOwned + Clone + Any + Send + Sync + 'static>(
+        &self, guild: Option<GuildId>, key: ConfigKey<T>
+    ) -> Result<T> {
+        self.0.config.get(&self.0.database.connect()?, guild, key)
     }
 
     pub fn set_app_log_level(&self, filter: LogLevelFilter) {
@@ -164,7 +179,7 @@ impl VerifierCore {
         "));
         config.push(LuaConfigEntry::new("bot_prefix", false, "!"));
         config.push(LuaConfigEntry::new("background_image", false, None as Option<&str>));
-        self.0.token_context.read().add_config(&mut config);
+        self.0.verifier.add_config(&mut config);
         config
     }
 

@@ -3,16 +3,15 @@
 extern crate libc;
 extern crate lz4_sys;
 
-use errors::*;
 use self::libc::*;
 
-// While these are defined as c_char in the actual headers, we cheat a little.
-// Hopefully this isn't an UB invitation.
+use errors::*;
+
 extern "C" {
     fn LZ4_compressBound(size: c_int) -> c_int;
-    fn LZ4_compress_default(source: *const c_uchar, dest: *mut c_uchar,
+    fn LZ4_compress_default(source: *const c_char, dest: *mut c_char,
                             source_size: c_int, max_dest_size: c_int) -> c_int;
-    fn LZ4_decompress_safe (source: *const c_uchar, dest: *mut c_uchar,
+    fn LZ4_decompress_safe (source: *const c_char, dest: *mut c_char,
                             compressed_size: c_int, max_decompressed_size: c_int) -> c_int;
 }
 
@@ -23,7 +22,8 @@ pub fn compress(data: &[u8]) -> Result<Vec<u8>> {
     ensure!(bound > 0, ErrorKind::LZ4Error);
     unsafe {
         let mut vec = Vec::with_capacity(bound as usize);
-        let compressed_len = LZ4_compress_default(data.as_ptr(), vec.as_mut_ptr(),
+        let compressed_len = LZ4_compress_default(data.as_ptr() as *const c_char,
+                                                  vec.as_mut_ptr() as *mut c_char,
                                                   data.len() as c_int, bound);
         ensure!(compressed_len > 0, ErrorKind::LZ4Error);
         vec.set_len(compressed_len as usize);
@@ -39,7 +39,8 @@ pub fn decompress(data: &[u8], decompressed_len: usize) -> Result<Vec<u8>> {
     unsafe {
         let mut vec = Vec::with_capacity(decompressed_len);
         vec.set_len(decompressed_len);
-        let decompressed = LZ4_decompress_safe(data.as_ptr(), vec.as_mut_ptr(),
+        let decompressed = LZ4_decompress_safe(data.as_ptr() as *const c_char,
+                                               vec.as_mut_ptr() as *mut c_char,
                                                data.len() as c_int, decompressed_len as c_int);
         ensure!(decompressed > 0 && decompressed as usize == decompressed_len, ErrorKind::LZ4Error);
         Ok(vec)

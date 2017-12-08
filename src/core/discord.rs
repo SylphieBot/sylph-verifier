@@ -1,17 +1,17 @@
 use commands::*;
 use core::*;
+use core::database::*;
 use errors::*;
 use parking_lot::{Mutex, RwLock};
 use serenity::Client;
 use serenity::model::*;
 use serenity::prelude::*;
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread;
 
-const DEFAULT_PREFIX: &'static str = "!";
-
 struct DiscordContext<'a> {
-    ctx: Context, message: &'a Message, content: &'a str,
+    ctx: Context, message: &'a Message, content: &'a str, prefix: String,
     privilege_level: PrivilegeLevel, command_target: CommandTarget,
 }
 impl <'a> CommandContextData for DiscordContext<'a> {
@@ -22,7 +22,7 @@ impl <'a> CommandContextData for DiscordContext<'a> {
         self.command_target
     }
     fn prefix(&self) -> &str {
-        DEFAULT_PREFIX
+        &self.prefix
     }
     fn message_content(&self) -> &str {
         self.content
@@ -45,8 +45,20 @@ struct Handler {
 }
 impl EventHandler for Handler {
     fn message(&self, ctx: Context, message: Message) {
-        let command = if message.content.starts_with(DEFAULT_PREFIX) {
-            let content = &message.content[DEFAULT_PREFIX.len()..];
+        let core = match self.core.read().as_ref().cloned() {
+            Some(core) => core,
+            None => return,
+        };
+        let prefix = core.catch_error(||
+            core.get_config(message.guild_id(), ConfigKeys::GlobalCommandPrefix)
+        );
+        let prefix = match prefix {
+            Ok(prefix) => prefix,
+            Err(_) => return,
+        };
+
+        let command = if message.content.starts_with(&prefix) {
+            let content = &message.content[prefix.len()..];
             get_command(content)
         } else {
             None
@@ -54,40 +66,32 @@ impl EventHandler for Handler {
 
         if let Some(command) = command {
             info!("User '{}' used command: {}", message.author, message.content);
-            if let Some(core) = self.core.read().as_ref().cloned() {
-                core.catch_error(|| {
-                    let content = &message.content[DEFAULT_PREFIX.len()..];
-                    if let Some(ch) = message.channel() {
-                        let (privilege_level, command_target) = match ch {
-                            Channel::Guild(ch) => {
-                                // TODO: Implement BotOwner
-                                let guild = ch.read().guild().chain_err(|| "Guild not found.")?;
-                                let owner_id = guild.read().owner_id;
-                                (if message.author.id == owner_id {
-                                    PrivilegeLevel::GuildOwner
-                                } else {
-                                    PrivilegeLevel::NormalUser
-                                }, CommandTarget::ServerMessage)
-                            }
-                            Channel::Group(_) | Channel::Private(_) | Channel::Category(_) =>
-                                (PrivilegeLevel::NormalUser, CommandTarget::PrivateMessage),
-                        };
-                        let ctx = DiscordContext {
-                            ctx, message: &message, content, privilege_level, command_target
-                        };
-                        command.run(&ctx, &core);
-                    }
-                    Ok(())
-                }).ok();
-            } else {
-                message.channel_id.send_message(|m|
-                    m.content(format_args!("<@{}> The verifier bot is currently shutting down \
-                                            or restarting and cannot handle your command.",
-                                           message.author.id.0))
-                ).ok();
-            }
+            core.catch_error(|| {
+                let content = &message.content[prefix.len()..];
+                if let Some(ch) = message.channel() {
+                    let (privilege_level, command_target) = match ch {
+                        Channel::Guild(ch) => {
+                            // TODO: Implement BotOwner
+                            let guild = ch.read().guild().chain_err(|| "Guild not found.")?;
+                            let owner_id = guild.read().owner_id;
+                            (if message.author.id == owner_id {
+                                PrivilegeLevel::GuildOwner
+                            } else {
+                                PrivilegeLevel::NormalUser
+                            }, CommandTarget::ServerMessage)
+                        }
+                        Channel::Group(_) | Channel::Private(_) | Channel::Category(_) =>
+                            (PrivilegeLevel::NormalUser, CommandTarget::PrivateMessage),
+                    };
+                    let ctx = DiscordContext {
+                        ctx, message: &message, prefix,
+                        content, privilege_level, command_target
+                    };
+                    command.run(&ctx, &core);
+                }
+                Ok(())
+            }).ok();
         }
-
     }
 }
 

@@ -134,9 +134,11 @@ fn parse_string_property<'a>(data: &'a[u8]) -> Result<Option<RblxStringPropertie
         let mut prop_values = Vec::new();
         while cursor.position() != data.len() as u64 {
             let data_len = cursor.read_u32::<LE>()?;
-            let data = String::from_utf8(read_cursor_slice(&mut cursor,
-                                                           data_len as usize).to_owned())?;
-            prop_values.push(data)
+            let data_vec = read_cursor_slice(&mut cursor, data_len as usize).to_owned();
+            match String::from_utf8(data_vec) {
+                Ok(data) => { prop_values.push(data); }
+                Err(_) => return Ok(None),
+            }
         }
         Ok(Some(RblxStringProperties {
             type_id, prop_name: String::from_utf8(name_slice.to_owned())?, prop_values
@@ -167,7 +169,9 @@ fn map_string_properties<F>(rblx: &mut RblxData, mut f: F) -> Result<()>
         let mut types = parse_types(rblx)?;
         for entry in &mut rblx.entries {
             if entry.kind == PROP_HEADER {
-                if let Some(prop) = parse_string_property(entry.data.decompress()?.as_ref())? {
+                let prop = parse_string_property(entry.data.decompress()?.as_ref())
+                    .chain_err(|| "Failed to parse property in Roblox place file.")?;
+                if let Some(prop) = prop {
                     if prop.prop_name == "Name" {
                         let type_name = types.remove(&prop.type_id)
                             .chain_err(|| format!("unknown type id: {}", prop.type_id))?;
@@ -366,20 +370,41 @@ const TEMPLATE_VERSION: &'static str = "1";
 pub fn create_place_file(overwrite_template: Option<&[u8]>,
                          config: Vec<LuaConfigEntry>) -> Result<Vec<u8>> {
     let place_file = overwrite_template.unwrap_or(PLACE_TEMPLATE);
-    let mut place = parse_rblx_container(place_file)?;
+    let mut place = parse_rblx_container(place_file)
+        .chain_err(|| "Failed to parse Roblox place container.")?;
     let mut version_found = false;
+
+    let mut server_secure_config_source = false;
+    let mut client_secure_config_source = false;
+
+    let mut server_secure_config_uuid = false;
+    let mut client_secure_config_uuid = false;
+
+    let mut template_message = false;
+
     map_string_properties(&mut place, |type_name, obj_name, prop_name, prop_value| {
         trace!("Place property: {} {}.{} = {}", type_name, obj_name, prop_name, prop_value);
         Ok(match (type_name, obj_name, prop_name) {
-            ("ModuleScript", "server_secure_config", "Source") =>
-                Some(make_config(&config, true )?),
-            ("ModuleScript", "client_config"       , "Source") =>
-                Some(make_config(&config, false)?),
-            ("ModuleScript", "server_secure_config", "ScriptGuid") |
-            ("ModuleScript", "client_config"       , "ScriptGuid") =>
-                Some(format!("{{{}}}", Uuid::new_v4())),
-            ("TextLabel", "TemplateMessage", "Text") =>
-                Some("".to_owned()),
+            ("ModuleScript", "server_secure_config", "Source") => {
+                server_secure_config_source = true;
+                Some(make_config(&config, true )?)
+            }
+            ("ModuleScript", "client_config", "Source") => {
+                client_secure_config_source = true;
+                Some(make_config(&config, false)?)
+            }
+            ("ModuleScript", "server_secure_config", "ScriptGuid") => {
+                server_secure_config_uuid = true;
+                Some(format!("{{{}}}", Uuid::new_v4()))
+            }
+            ("ModuleScript", "client_config", "ScriptGuid") => {
+                client_secure_config_uuid = true;
+                Some(format!("{{{}}}", Uuid::new_v4()))
+            }
+            ("TextLabel", "TemplateMessage", "Text") => {
+                template_message = true;
+                Some("".to_owned())
+            }
             ("StringValue", "TemplateVersion", "Value") => {
                 ensure!(prop_value == TEMPLATE_VERSION,
                         "wrong place template version: expected '{}', got '{}'",
@@ -391,7 +416,12 @@ pub fn create_place_file(overwrite_template: Option<&[u8]>,
         })
     })?;
 
-    ensure!(version_found, "place has no version property");
+    ensure!(server_secure_config_source && server_secure_config_uuid,
+            "Place has no server config ModuleScript!");
+    ensure!(client_secure_config_source && client_secure_config_uuid,
+            "Place has no client config ModuleScript!");
+    ensure!(template_message, "Place has no template marker TextLabel!");
+    ensure!(version_found, "Place has no version property!");
 
     let mut cursor = Cursor::new(Vec::new());
     write_rblx_container(&mut cursor, &place)?;

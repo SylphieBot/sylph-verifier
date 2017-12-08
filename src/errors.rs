@@ -23,10 +23,6 @@ mod internal {
                 description("command aborted")
             }
 
-            InvalidToken {
-                description("token must be six upper case letters")
-            }
-
             LZ4Error {
                 description("LZ4 error")
             }
