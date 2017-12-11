@@ -1,9 +1,9 @@
 use commands::*;
 use core::VerifierCore;
-use core::logger;
 use errors::*;
 use linefeed::*;
 use linefeed::reader::LogSender;
+use logger;
 use std::io;
 use std::thread;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -58,15 +58,23 @@ impl <'a> Terminal<'a> {
             match self.reader.read_line() {
                 Ok(ReadResult::Input(line)) => {
                     self.core.catch_error(|| {
-                        if !line.trim().is_empty() && line != last_line {
-                            self.reader.add_history(line.clone());
-                            last_line = line.clone();
+                        let line = line.trim();
+
+                        info!(target: "$command_input", "{}", line);
+
+                        if line.is_empty() {
+                            return Ok(())
+                        }
+
+                        if line != last_line {
+                            self.reader.add_history(line.to_owned());
+                            last_line = line.to_owned();
                         }
 
                         let command_no = COMMAND_ID.fetch_add(1, Ordering::Relaxed);
                         if let Some(command) = get_command(&line) {
                             let ctx = TerminalContext {
-                                line, command_no,
+                                line: line.to_owned(), command_no,
                             };
                             let core = self.core.clone();
 

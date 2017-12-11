@@ -1,4 +1,4 @@
-use diesel::connection::{Connection, SimpleConnection, TransactionManager};
+use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use errors::*;
@@ -32,16 +32,17 @@ impl ManageConnection for ConnectionManager {
         conn.batch_execute(include_str!("setup_connection.sql"))?;
         Ok(conn)
     }
-    fn is_valid(&self, _conn: &mut SqliteConnection) -> Result<()> {
-        // TODO: I don't think sqlite connections can break
-        Ok(())
+    fn is_valid(&self, conn: &mut SqliteConnection) -> Result<()> {
+        conn.execute("SELECT 1").map(|_| ()).chain_err(|| "Connection broke")
     }
     fn has_broken(&self, _conn: &mut SqliteConnection) -> bool {
         false
     }
 }
 
+#[allow(unused_imports)]
 pub mod schema {
+    // TODO: When the schema stabalizes, switch to using print-schema, with custom types.
     infer_schema!("dotenv:DATABASE_URL");
 }
 embed_migrations!();
@@ -208,7 +209,6 @@ macro_rules! custom_db_type {
             use diesel::types::*;
             use std::error::Error;
             use std::io::Write;
-
 
             impl <DB> ToSql<$db_ty, DB> for $t
                 where <$t as CustomDBType>::Underlying_To:ToSql<$db_ty, DB>, DB: Backend {

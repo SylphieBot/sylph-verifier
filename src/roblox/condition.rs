@@ -2,7 +2,6 @@ use errors::*;
 use nom::IResult;
 use roblox::{api, RobloxUserID};
 use std::collections::{HashSet, HashMap};
-use std::mem;
 use std::panic;
 use std::ptr;
 use std::process::abort;

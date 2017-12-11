@@ -1,5 +1,7 @@
 #![allow(non_camel_case_types)]
 
+// TODO: Make CommandError an errors variant.
+
 mod internal {
     use *;
     error_chain! {
@@ -19,8 +21,9 @@ mod internal {
         }
 
         errors {
-            CommandAborted {
-                description("command aborted")
+            CommandError(err: String) {
+                description("command encountered an error")
+                display("{}", err)
             }
 
             LZ4Error {
@@ -36,3 +39,19 @@ mod internal {
 // Reexport these types so IDEs pick up on them correctly.
 pub use self::internal::{Error, ErrorKind, Result, ResultExt};
 
+macro_rules! cmd_error {
+    ($err:expr $(,)*) => {
+        bail!($crate::errors::ErrorKind::CommandError(format!("{}", $err)))
+    };
+    ($err:expr, $($arg:expr),* $(,)*) => {
+        bail!($crate::errors::ErrorKind::CommandError(format!($err, $($arg,)*)))
+    };
+}
+macro_rules! cmd_ensure {
+    ($cond:expr, $err:expr $(,)*) => {
+        ensure!($cond, $crate::errors::ErrorKind::CommandError(format!("{}", $err)))
+    };
+    ($cond:expr, $err:expr, $($arg:expr),* $(,)*) => {
+        ensure!($cond, $crate::errors::ErrorKind::CommandError(format!($err, $($arg,)*)))
+    };
+}

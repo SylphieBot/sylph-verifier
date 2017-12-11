@@ -59,12 +59,9 @@ fn set_log_filter_obj(filter: MaxLogLevelFilter) {
     *LOG_LEVEL_FILTER.lock() = Some(filter);
     update_log_filter_obj();
 }
-pub fn set_app_filter_level(level: LogLevelFilter) {
-    LOG_LEVEL_APP.store(level);
-    update_log_filter_obj();
-}
-pub fn set_lib_filter_level(level: LogLevelFilter) {
-    LOG_LEVEL_LIB.store(level);
+pub fn set_filter_level(app_level: LogLevelFilter, log_level: LogLevelFilter) {
+    LOG_LEVEL_APP.store(app_level);
+    LOG_LEVEL_LIB.store(log_level);
     update_log_filter_obj();
 }
 const MODULE_PATH_INIT: &'static str = "sylph_verifier::";
@@ -88,12 +85,14 @@ fn check_level(source: &str, level: LogLevel) -> bool {
 
 static LOG_SENDER: Mutex<Option<LogSender>> = Mutex::new(None);
 pub fn set_log_sender(sender: LogSender) {
-    let mut cur_sender = LOG_SENDER.lock();
-    if cur_sender.is_some() {
-        panic!("Attempted to set log sender twice!")
-    }
-    *cur_sender = Some(sender);
+    *LOG_SENDER.lock() = Some(sender);
 }
+
+#[cfg(windows)]
+const NEW_LINE: &'static str = "\r\n"; // Because Notepad exists.
+
+#[cfg(not(windows))]
+const NEW_LINE: &'static str = "\n";
 
 enum LogFileOutput {
     NotInitialized, Initialized {
@@ -128,7 +127,7 @@ impl LogFileOutput {
     fn log(&mut self, log_dir: &PathBuf, line: &str) -> Result<()> {
         self.check_open_new(log_dir)?;
         if let &mut LogFileOutput::Initialized { ref mut out, .. } = self {
-            writeln!(out, "{}", line)?;
+            write!(out, "{}{}", line, NEW_LINE)?;
             out.flush()?;
             Ok(())
         } else {
@@ -159,11 +158,15 @@ impl Log for Logger {
             let now = Local::now().format("%Y-%m-%d %H:%M:%S");
             let line = if record.target() == "$raw" {
                 format!("[{}] {}", now, record.args())
+            } else if record.target() == "$command_input" {
+                format!("sylph-verifier> {}", record.args())
             } else {
                 format!("[{}] [{}/{}] {}",
                         now, munge_target(record.target()), record.level(), record.args())
             };
-            log_raw(&line);
+            if record.target() != "$command_input" {
+                log_raw(&line);
+            }
             if let Err(_) = LOG_FILE.lock().log(&self.log_dir, &line) {
                 log_raw(&format!("[{}] [{}/WARN] Failed to log line to disk!",
                                  now, munge_target(module_path!())))

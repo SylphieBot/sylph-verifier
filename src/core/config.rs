@@ -1,8 +1,7 @@
 use core::*;
 use core::schema::*;
 use diesel::prelude::*;
-use errors::*;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockWriteGuard};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;
@@ -15,10 +14,13 @@ use std::ops::Deref;
 // TODO: Get rid of Clone here?
 // TODO: Prevent per-guild cache from growing indefinitely.
 
-pub struct ConfigKey<T> {
-    db_name: &'static str, default: fn() -> T,
-    _phantom: PhantomData<(fn(T), fn() -> T)>,
+struct ConfigKeyData<T> {
+    // Storage related
+    db_name: &'static str, default: fn() -> T, _phantom: PhantomData<(fn(T), fn() -> T)>,
+    change_hook: fn(&VerifierCore, Option<GuildId>, T) -> Result<()>,
 }
+
+pub struct ConfigKey<T: 'static>(&'static ConfigKeyData<T>);
 impl <T> Clone for ConfigKey<T> {
     fn clone(&self) -> Self {
         *self
@@ -28,28 +30,42 @@ impl <T> Copy for ConfigKey<T> { }
 
 pub enum ConfigKeys { }
 
+macro_rules! config_keys_change_hook {
+    ($change_hook:expr) => {$change_hook};
+    () => { |_, _, _| Ok(()) };
+}
 macro_rules! config_keys {
-    ($($name:ident: $tp:ty => $default:expr;)*) => {
+    ($($name:ident<$tp:ty>($default:expr$(, $change_hook:expr)*);)*) => {
         $(
-            impl ConfigKeys {
-                #[allow(non_upper_case_globals)]
-                pub const $name: ConfigKey<$tp> = ConfigKey {
-                    db_name: stringify!($name), _phantom: PhantomData, default: || $default,
-                };
-            }
+            #[allow(non_upper_case_globals)]
+            const $name: &'static ConfigKeyData<$tp> = &ConfigKeyData {
+                db_name: stringify!($name), _phantom: PhantomData, default: || $default,
+                change_hook: config_keys_change_hook!($($change_hook)*),
+            };
         )*
 
+        impl ConfigKeys {
+            $(
+                #[allow(non_upper_case_globals)]
+                pub const $name: ConfigKey<$tp> = ConfigKey($name);
+            )*
+        }
+
         const ALL_KEYS: &'static [&'static str] = &[
-            $(ConfigKeys::$name.db_name,)*
+            $(ConfigKeys::$name.0.db_name,)*
         ];
     }
 }
 
 config_keys! {
-    GlobalCommandPrefix: String => "!".to_owned();
+    CommandPrefix<String>("!".to_owned());
+    DiscordToken<Option<String>>(None);
+    TokenValiditySeconds<i32>(300, |ctx, _, _| ctx.rekey(false));
+    ReverificationTimeout<u64>(600);
 }
 
-type ValueContainer = RwLock<Option<Box<Any + Send + Sync + 'static>>>;
+type ConfigValue = Option<Box<Any + Send + Sync + 'static>>;
+type ValueContainer = RwLock<ConfigValue>;
 struct ConfigCache(HashMap<&'static str, ValueContainer>);
 impl ConfigCache {
     fn new() -> ConfigCache {
@@ -61,7 +77,7 @@ impl ConfigCache {
     }
 
     fn get<T>(&self, key: ConfigKey<T>) -> &ValueContainer {
-        self.0.get(&key.db_name).unwrap()
+        self.0.get(&key.0.db_name).unwrap()
     }
 }
 
@@ -134,71 +150,76 @@ impl ConfigManager {
     ) -> T where F: FnOnce(&ConfigCache) -> T {
         match guild {
             Some(guild) => {
-                if let Some(cache) = self.guild_cache.read().get(&guild) {
-                    f(cache)
-                } else {
-                    let mut guild_cache = self.guild_cache.write();
-                    if guild_cache.get(&guild).is_none() {
-                        guild_cache.insert(guild, ConfigCache::new());
+                {
+                    if self.guild_cache.read().get(&guild).is_some() {
+                        return f(self.guild_cache.read().get(&guild).unwrap())
                     }
-                    f(guild_cache.get(&guild).unwrap())
                 }
+
+                // None case
+                let mut guild_cache = self.guild_cache.write();
+                if guild_cache.get(&guild).is_none() {
+                    guild_cache.insert(guild, ConfigCache::new());
+                }
+                f(guild_cache.get(&guild).unwrap())
             }
             None => f(&self.global_cache),
         }
     }
 
-    pub fn set<T : Serialize + Any + Send + Sync + 'static>(
-        &self, conn: &DatabaseConnection, guild: Option<GuildId>, key: ConfigKey<T>, val: T
+    pub fn set<T : Serialize + Clone + Any + Send + Sync>(
+        &self, core: &VerifierCore, conn: &DatabaseConnection, guild: Option<GuildId>,
+        key: ConfigKey<T>, val: T,
     ) -> Result<()> {
         self.get_cache(guild, |cache| {
             let mut cache = cache.get(key).write();
-            self.set_db(conn, guild, key.db_name, &serde_json::to_string(&val)?);
-            *cache = Some(Box::new(val));
-            Ok(())
+            self.set_db(conn, guild, key.0.db_name, &serde_json::to_string(&val)?)?;
+            *cache = Some(Box::new(val.clone()));
+            (key.0.change_hook)(core, guild, val)
         })
     }
-    pub fn reset<T: Any + Send + Sync + 'static>(
-        &self, conn: &DatabaseConnection, guild: Option<GuildId>, key: ConfigKey<T>
+    pub fn reset<T: Clone + Any + Send + Sync>(
+        &self, core: &VerifierCore, conn: &DatabaseConnection, guild: Option<GuildId>,
+        key: ConfigKey<T>
     ) -> Result<()> {
         self.get_cache(guild, |cache| {
             let mut cache = cache.get(key).write();
-            self.reset_db(conn, guild, key.db_name);
-            *cache = Some(Box::new((key.default)()));
-            Ok(())
+            self.reset_db(conn, guild, key.0.db_name)?;
+            let val = (key.0.default)();
+            *cache = Some(Box::new(val.clone()));
+            (key.0.change_hook)(core, guild, val)
         })
     }
-    pub fn get<T : Serialize + DeserializeOwned + Clone + Any + Send + Sync + 'static>(
-        &self, conn: &DatabaseConnection, guild: Option<GuildId>, key: ConfigKey<T>
+    pub fn get<T : Serialize + DeserializeOwned + Clone + Any + Send + Sync>(
+        &self, conn: &DatabaseConnection, guild: Option<GuildId>,
+        key: ConfigKey<T>
     ) -> Result<T> {
         self.get_cache(guild, |cache| {
             let lock = cache.get(key);
-            if let &Some(ref any) = &*lock.read() {
-                Ok(Any::downcast_ref::<T>(any.deref()).unwrap().clone())
-            } else {
-                match guild {
-                    Some(_) => self.get(conn, None, key),
-                    None => {
-                        let mut cache = lock.write();
-                        if cache.is_some() {
-                            let any = cache.as_mut().unwrap();
-                            Ok(Any::downcast_ref::<T>(any.deref()).unwrap().clone())
-                        } else {
-                            conn.transaction_immediate(|| {
-                                match self.get_db(conn, None, key.db_name)? {
-                                    Some(value) => {
-                                        let value = serde_json::from_str::<T>(&value)?;
-                                        *cache = Some(Box::new(value.clone()));
-                                        Ok(value)
-                                    }
-                                    None => {
-                                        let value = (key.default)();
-                                        self.set(conn, None, key, value.clone())?;
-                                        Ok(value)
-                                    }
-                                }
-                            })
-                        }
+
+            {
+                if let &Some(ref any) = &*lock.read() {
+                    return Ok(Any::downcast_ref::<T>(any.deref()).unwrap().clone())
+                }
+            }
+
+            // None case
+            match guild {
+                Some(_) => self.get(conn, None, key),
+                None => {
+                    let mut cache = lock.write();
+                    if cache.is_some() {
+                        let any = cache.as_mut().unwrap();
+                        Ok(Any::downcast_ref::<T>(any.deref()).unwrap().clone())
+                    } else {
+                        conn.transaction_immediate(|| {
+                            let value = match self.get_db(conn, None, key.0.db_name)? {
+                                Some(value) => serde_json::from_str::<T>(&value)?,
+                                None => (key.0.default)(),
+                            };
+                            *cache = Some(Box::new(value.clone()));
+                            Ok(value)
+                        })
                     }
                 }
             }

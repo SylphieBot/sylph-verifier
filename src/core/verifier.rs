@@ -1,4 +1,5 @@
 use constant_time_eq::constant_time_eq;
+use core::*;
 use core::database::*;
 use core::schema::*;
 use diesel::dsl::count_star;
@@ -233,22 +234,44 @@ impl CustomDBType for RobloxUserID {
 custom_db_type!(RobloxUserID, roblox_user_id_mod, BigInt);
 
 pub struct Verifier {
-    database: Database, token_ctx: RwLock<TokenContext>,
+    database: Database, token_ctx: RwLock<Option<TokenContext>>,
 }
 impl Verifier {
     pub fn new(database: Database) -> Result<Verifier> {
-        let token_ctx = RwLock::new(TokenContext::from_db(&database.connect()?, 300)?);
-        Ok(Verifier { database, token_ctx })
+        Ok(Verifier { database, token_ctx: RwLock::new(None), })
     }
 
-    pub fn get_verified_user(&self, user: UserId) -> Result<Option<RobloxUserID>> {
+    pub fn check_update(&self, core: &VerifierCore) -> Result<()> {
+        let ctx = TokenContext::from_db(&self.database.connect()?,
+                                        core.get_config(None, ConfigKeys::TokenValiditySeconds)?)?;
+        *self.token_ctx.write() = Some(ctx);
+        Ok(())
+    }
+    pub fn rekey(&self, core: &VerifierCore) -> Result<()> {
+        let db = self.database.connect()?;
+        db.transaction_immediate(|| {
+            let mut token_context = self.token_ctx.write();
+            let validity = core.get_config(None, ConfigKeys::TokenValiditySeconds)?;
+            *token_context = Some(TokenContext::rekey(&db, validity)?);
+            Ok(())
+        })
+    }
+
+    pub fn get_verified_roblox_user(&self, user: UserId) -> Result<Option<RobloxUserID>> {
         let conn = self.database.connect()?;
         Ok(discord_user_info::table
             .filter(discord_user_info::discord_user_id.eq(user.0 as i64))
             .select(discord_user_info::roblox_user_id)
             .load(conn.deref())?.into_iter().next().and_then(|x| x))
     }
-    pub fn attempt_verification(
+    pub fn get_verified_discord_user(&self, user: RobloxUserID) -> Result<Option<UserId>> {
+        let conn = self.database.connect()?;
+        Ok(discord_user_info::table
+            .filter(discord_user_info::roblox_user_id.eq(user))
+            .select(discord_user_info::discord_user_id)
+            .load::<i64>(conn.deref())?.into_iter().next().map(|x| UserId(x as u64)))
+    }
+    pub fn try_verify(
         &self, discord_id: UserId, roblox_id: RobloxUserID, token: &str
     ) -> Result<TokenStatus> {
         let conn = self.database.connect()?;
@@ -258,15 +281,6 @@ impl Verifier {
     }
 
     pub fn add_config<'a>(&self, config: &'a mut Vec<LuaConfigEntry>) {
-        self.token_ctx.read().current.add_config(config)
-    }
-
-    pub fn rekey(&self) -> Result<()> {
-        let db = self.database.connect()?;
-        db.transaction_immediate(|| {
-            let mut token_context = self.token_ctx.write();
-            *token_context = TokenContext::rekey(&db, 300)?;
-            Ok(())
-        })
+        self.token_ctx.read().as_ref().unwrap().current.add_config(config)
     }
 }

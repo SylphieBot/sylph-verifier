@@ -1,14 +1,16 @@
+// TODO: Refactor, restructure, and clean up this module.
+
 use errors::*;
 use fs2::*;
 use linefeed::reader::LogSender;
-use log::LogLevelFilter;
 use parking_lot::*;
 use roblox::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serenity::model::GuildId;
+use serenity::model::{UserId, GuildId};
 use std::any::Any;
 use std::fs::{File, OpenOptions};
+use std::mem::drop;
 use std::panic::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,16 +23,17 @@ use std::time::{Duration, Instant};
 mod config;
 mod discord;
 mod error_report;
-mod logger;
 mod terminal;
 mod verifier;
 
 pub use self::config::{ConfigKey, ConfigKeys};
 pub use self::database::{DatabaseConnection, schema};
-pub use self::verifier::{Verifier, TokenStatus, RekeyReason};
+pub use self::verifier::{TokenStatus, RekeyReason};
 
 use self::config::ConfigManager;
 use self::database::Database;
+use self::discord::DiscordManager;
+use self::verifier::Verifier;
 
 const LOCK_FILE_NAME: &'static str = "Sylph-Verifier.lock";
 const DB_FILE_NAME: &'static str = "Sylph-Verifier.db";
@@ -59,7 +62,8 @@ const STATUS_UNINIT  : u8 = 4;
 
 struct VerifierCoreData {
     root_path: PathBuf, shutdown_sender: Mutex<Option<LogSender>>, status: AtomicU8,
-    _lock: File, database: database::Database, verifier: Verifier, config: ConfigManager,
+    _lock: File, database: Database, config: ConfigManager,
+    verifier: Verifier, discord: Mutex<DiscordManager>,
 }
 
 #[derive(Clone)]
@@ -71,7 +75,6 @@ impl VerifierCore {
                 "Cannot create multiple VerifierCores.");
 
         let root_path = root_path.as_ref();
-        logger::init(root_path)?;
         error_report::init_panic_hook();
         let db_path = db_path.map_or_else(|| in_path(root_path, DB_FILE_NAME),
                                           |x| x.as_ref().into());
@@ -85,17 +88,23 @@ impl VerifierCore {
             };
             let database = Database::new(db_path)?;
             let verifier = Verifier::new(database.clone())?;
-            Ok(VerifierCore(Arc::new(VerifierCoreData {
+            let core = VerifierCore(Arc::new(VerifierCoreData {
                 root_path: root_path.to_owned(), shutdown_sender: Mutex::new(None),
                 status: AtomicU8::new(STATUS_NOT_INIT),
-                _lock: lock, database, verifier, config: ConfigManager::new(),
-            })))
+                _lock: lock, database, config: ConfigManager::new(),
+                verifier, discord: Mutex::new(DiscordManager::new()),
+            }));
+            core.0.verifier.check_update(&core)?;
+            core.0.discord.lock().set_core(&core);
+            Ok(core)
         })?)
     }
     pub fn start(self) -> Result<()> {
+        // TODO: Do better error handling in this.
         ensure!(self.0.status.compare_and_swap(STATUS_NOT_INIT, STATUS_STARTING,
                                                Ordering::Relaxed) == STATUS_NOT_INIT,
                 "VerifierCore already running.");
+        self.connect_discord()?;
         let mut terminal = terminal::Terminal::new(&self)?;
         *self.0.shutdown_sender.lock() = Some(terminal.new_sender());
         ensure!(self.0.status.compare_and_swap(STATUS_STARTING, STATUS_RUNNING,
@@ -104,6 +113,7 @@ impl VerifierCore {
         terminal.start()?;
         ensure!(self.0.status.load(Ordering::Relaxed) == STATUS_SHUTDOWN,
                 "Terminal interrupted without initializing shutdown!");
+        self.0.discord.lock().shutdown()?;
         let mut next_message = Instant::now() + Duration::from_secs(1);
         let mut printed_waiting = false;
         loop {
@@ -142,31 +152,49 @@ impl VerifierCore {
         self.0.status.load(Ordering::Relaxed) == STATUS_RUNNING
     }
 
-    pub fn get_verifier(&self) -> &Verifier {
-        &self.0.verifier
+    pub fn get_verified_roblox_user(&self, user: UserId) -> Result<Option<RobloxUserID>> {
+        self.0.verifier.get_verified_roblox_user(user)
+    }
+    pub fn get_verified_discord_user(&self, user: RobloxUserID) -> Result<Option<UserId>> {
+        self.0.verifier.get_verified_discord_user(user)
+    }
+    pub fn try_verify(
+        &self, discord_id: UserId, roblox_id: RobloxUserID, token: &str
+    ) -> Result<TokenStatus> {
+        self.0.verifier.try_verify(discord_id, roblox_id, token)
+    }
+    pub fn rekey(&self, force: bool) -> Result<()> {
+        if force {
+            self.0.verifier.rekey(self)
+        } else {
+            self.0.verifier.check_update(self)
+        }
     }
 
-    pub fn set_config<T: Serialize + DeserializeOwned + Clone + Any + Send + Sync + 'static>(
+    pub fn set_config<T: Serialize + DeserializeOwned + Clone + Any + Send + Sync>(
         &self, guild: Option<GuildId>, key: ConfigKey<T>, value: T
     ) -> Result<()> {
-        self.0.config.set(&self.0.database.connect()?, guild, key, value)
+        self.0.config.set(self, &self.0.database.connect()?, guild, key, value)
     }
-    pub fn reset_config<T: Serialize + DeserializeOwned + Clone + Any + Send + Sync + 'static>(
+    pub fn reset_config<T: Serialize + DeserializeOwned + Clone + Any + Send + Sync>(
         &self, guild: Option<GuildId>, key: ConfigKey<T>
     ) -> Result<()> {
-        self.0.config.reset(&self.0.database.connect()?, guild, key)
+        self.0.config.reset(self, &self.0.database.connect()?, guild, key)
     }
-    pub fn get_config<T: Serialize + DeserializeOwned + Clone + Any + Send + Sync + 'static>(
+    pub fn get_config<T: Serialize + DeserializeOwned + Clone + Any + Send + Sync>(
         &self, guild: Option<GuildId>, key: ConfigKey<T>
     ) -> Result<T> {
         self.0.config.get(&self.0.database.connect()?, guild, key)
     }
 
-    pub fn set_app_log_level(&self, filter: LogLevelFilter) {
-        logger::set_app_filter_level(filter)
+    pub fn connect_discord(&self) -> Result<()> {
+        self.0.discord.lock().connect()
     }
-    pub fn set_lib_log_level(&self, filter: LogLevelFilter) {
-        logger::set_lib_filter_level(filter)
+    pub fn disconnect_discord(&self) -> Result<()> {
+        self.0.discord.lock().disconnect()
+    }
+    pub fn reconnect_discord(&self) -> Result<()> {
+        self.0.discord.lock().reconnect()
     }
 
     pub fn place_config(&self) -> Vec<LuaConfigEntry> {

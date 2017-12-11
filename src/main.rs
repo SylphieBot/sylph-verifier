@@ -34,15 +34,18 @@ extern crate uuid;
 #[macro_use] extern crate nom;
 #[macro_use] extern crate serde_derive;
 
-mod boot;
+#[macro_use] mod errors;
+
 mod commands;
 mod core;
-mod errors;
+mod logger;
 mod roblox;
+mod startup;
 
 fn main() {
     println!("Sylph-Verifier v{} by LymeeFairy", env!("CARGO_PKG_VERSION"));
     println!("Licenced under the Apache license, version 2.0");
     println!();
-    boot::start();
+
+    startup::start();
 }
