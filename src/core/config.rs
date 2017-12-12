@@ -1,7 +1,7 @@
 use core::*;
 use core::schema::*;
 use diesel::prelude::*;
-use parking_lot::{RwLock, RwLockWriteGuard};
+use parking_lot::RwLock;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;

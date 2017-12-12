@@ -5,15 +5,12 @@ use errors::*;
 use parking_lot::RwLock;
 use std::any::Any;
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::fmt::{Write as FmtWrite};
 use std::fs;
 use std::fs::File;
 use std::io::{Write as IoWrite};
-use std::mem::replace;
 use std::panic::*;
 use std::path::{Path, PathBuf};
-use std::process::abort;
 use std::thread;
 use thread_id;
 

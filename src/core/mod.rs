@@ -1,20 +1,15 @@
 // TODO: Refactor, restructure, and clean up this module.
 
-use error_report::*;
 use errors::*;
 use fs2::*;
 use linefeed::reader::LogSender;
 use parking_lot::*;
 use roblox::*;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use serenity::model::{UserId, GuildId};
-use std::any::Any;
+use serenity::model::UserId;
 use std::fs::{File, OpenOptions};
-use std::mem::drop;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 

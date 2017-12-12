@@ -1,6 +1,5 @@
 use commands::*;
 use core::*;
-use core::database::*;
 use error_report;
 use parking_lot::{Mutex, RwLock};
 use serenity::Client;
