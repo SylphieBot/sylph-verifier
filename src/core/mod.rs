@@ -1,5 +1,6 @@
 // TODO: Refactor, restructure, and clean up this module.
 
+use commands::*;
 use errors::*;
 use fs2::*;
 use linefeed::reader::LogSender;
@@ -26,6 +27,7 @@ pub use self::verifier::{TokenStatus, RekeyReason};
 
 use self::database::Database;
 use self::discord::DiscordManager;
+use self::terminal::Terminal;
 use self::verifier::Verifier;
 
 const LOCK_FILE_NAME: &'static str = "Sylph-Verifier.lock";
@@ -45,6 +47,37 @@ fn in_path<P: AsRef<Path>>(root_path: P, file: &str) -> PathBuf {
     path
 }
 
+#[derive(Clone)]
+struct CommandSender(Arc<RwLock<Option<VerifierCore>>>);
+impl CommandSender {
+    fn new() -> CommandSender {
+        CommandSender(Arc::new(RwLock::new(None)))
+    }
+    fn init(&self, core: &VerifierCore) {
+        *self.0.write() = Some(core.clone())
+    }
+    pub fn run_command(&self, command: &Command, ctx: &CommandContextData) {
+        let core = self.0.read().as_ref().cloned();
+        match core {
+            Some(core) => command.run(ctx, &core),
+            None => {
+                ctx.respond("The bot is currently shutting down. Please wait until it is \
+                                 restarted.", true).ok();
+            }
+        }
+    }
+    pub fn is_alive(&self) -> bool {
+        if let Some(core) = self.0.read().as_ref() {
+            core.is_alive()
+        } else {
+            false
+        }
+    }
+    fn shutdown(&self) {
+        *self.0.write() = None
+    }
+}
+
 const STATUS_NOT_INIT: u8 = 0;
 const STATUS_STARTING: u8 = 1;
 const STATUS_RUNNING : u8 = 2;
@@ -52,9 +85,9 @@ const STATUS_SHUTDOWN: u8 = 3;
 const STATUS_UNINIT  : u8 = 4;
 
 struct VerifierCoreData {
-    root_path: PathBuf, shutdown_sender: Mutex<Option<LogSender>>, status: AtomicU8,
-    _lock: File, database: Database, config: ConfigManager,
-    verifier: Verifier, discord: Mutex<DiscordManager>,
+    status: AtomicU8,
+    _lock: File, database: Database, config: ConfigManager, cmd_sender: CommandSender,
+    terminal: Terminal, verifier: Verifier, discord: Mutex<DiscordManager>,
 }
 
 #[derive(Clone)]
@@ -73,16 +106,21 @@ impl VerifierCore {
                 return Err(err)
             }
         };
+
         let database = Database::new(db_path)?;
         let config = ConfigManager::new(database.clone());
+        let cmd_sender = CommandSender::new();
+
+        let terminal = Terminal::new(cmd_sender.clone())?;
         let verifier = Verifier::new(config.clone(), database.clone())?;
+        let discord = Mutex::new(DiscordManager::new(config.clone(), cmd_sender.clone()));
+
         let core = VerifierCore(Arc::new(VerifierCoreData {
-            root_path: root_path.to_owned(), shutdown_sender: Mutex::new(None),
             status: AtomicU8::new(STATUS_NOT_INIT),
-            _lock: lock, database, config,
-            verifier, discord: Mutex::new(DiscordManager::new()),
+            _lock: lock, database, config, cmd_sender,
+            terminal, verifier, discord,
         }));
-        core.0.discord.lock().set_core(&core);
+        core.0.cmd_sender.init(&core);
         Ok(core)
     }
     pub fn start(self) -> Result<()> {
@@ -91,14 +129,13 @@ impl VerifierCore {
                                                Ordering::Relaxed) == STATUS_NOT_INIT,
                 "VerifierCore already running.");
         self.connect_discord()?;
-        let mut terminal = terminal::Terminal::new(&self)?;
-        *self.0.shutdown_sender.lock() = Some(terminal.new_sender());
         ensure!(self.0.status.compare_and_swap(STATUS_STARTING, STATUS_RUNNING,
                                                Ordering::Relaxed) == STATUS_STARTING,
                 "VerifierCore status corrupted: expected STATUS_STARTING");
-        terminal.start()?;
+        self.0.terminal.start()?;
         ensure!(self.0.status.load(Ordering::Relaxed) == STATUS_SHUTDOWN,
                 "Terminal interrupted without initializing shutdown!");
+        self.0.cmd_sender.shutdown();
         self.0.discord.lock().shutdown()?;
         let mut next_message = Instant::now() + Duration::from_secs(1);
         let mut printed_waiting = false;
@@ -126,7 +163,7 @@ impl VerifierCore {
             STATUS_NOT_INIT => bail!("VerifierCore not started yet."),
             STATUS_STARTING => bail!("VerifierCore not fully started yet."),
             STATUS_RUNNING  => {
-                self.0.shutdown_sender.lock().as_ref().unwrap().interrupt().ok();
+                self.0.terminal.interrupt();
                 Ok(())
             },
             STATUS_SHUTDOWN => bail!("VerifierCore already shutting down."),

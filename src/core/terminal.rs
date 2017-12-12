@@ -1,10 +1,11 @@
 use commands::*;
-use core::VerifierCore;
+use core::*;
 use error_report;
 use errors::*;
 use linefeed::*;
 use linefeed::reader::LogSender;
 use logger;
+use parking_lot::Mutex;
 use std::io;
 use std::thread;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -36,27 +37,24 @@ impl CommandContextData for TerminalContext {
 
 static COMMAND_ID: AtomicUsize = AtomicUsize::new(0);
 
-pub struct Terminal<'a> {
-    core: &'a VerifierCore,
-    reader: Reader<DefaultTerminal>,
+pub struct Terminal {
+    cmd_sender: CommandSender, sender: Mutex<Option<LogSender>>,
 }
-impl <'a> Terminal<'a> {
-    pub fn new(core: &VerifierCore) -> Result<Terminal> {
+impl Terminal {
+    pub(in ::core) fn new(cmd_sender: CommandSender) -> Result<Terminal> {
+        Ok(Terminal { cmd_sender, sender: Mutex::new(None) })
+    }
+    pub fn start(&self) -> Result<()> {
         let mut reader = Reader::new("sylph-verifier")?;
         reader.set_prompt("sylph-verifier> ");
         reader.set_history_size(1000);
+
         logger::set_log_sender(reader.get_log_sender());
-        Ok(Terminal {
-            core, reader,
-        })
-    }
-    pub fn new_sender(&mut self) -> LogSender {
-        self.reader.get_log_sender()
-    }
-    pub fn start(&mut self) -> Result<()> {
+        *self.sender.lock() = Some(reader.get_log_sender());
+
         let mut last_line = String::new();
         'outer: loop {
-            match self.reader.read_line() {
+            match reader.read_line() {
                 Ok(ReadResult::Input(line)) => {
                     error_report::catch_error(|| {
                         let line = line.trim();
@@ -68,7 +66,7 @@ impl <'a> Terminal<'a> {
                         }
 
                         if line != last_line {
-                            self.reader.add_history(line.to_owned());
+                            reader.add_history(line.to_owned());
                             last_line = line.to_owned();
                         }
 
@@ -77,14 +75,14 @@ impl <'a> Terminal<'a> {
                             let ctx = TerminalContext {
                                 line: line.to_owned(), command_no,
                             };
-                            let core = self.core.clone();
 
                             if command.no_threading {
-                                command.run(&ctx, &core)
+                                self.cmd_sender.run_command(command, &ctx)
                             } else {
+                                let cmd_sender = self.cmd_sender.clone();
                                 thread::Builder::new()
                                     .name(format!("terminal command #{}", ctx.command_no + 1))
-                                    .spawn(move || command.run(&ctx, &core))?;
+                                    .spawn(move || cmd_sender.run_command(command, &ctx))?;
                                 thread::yield_now();
                             }
                         } else {
@@ -98,19 +96,23 @@ impl <'a> Terminal<'a> {
                 Ok(ReadResult::Signal(_)) =>
                     unreachable!(),
                 Err(err) =>
-                    if err.kind() != io::ErrorKind::Interrupted || !self.reader.was_interrupted() {
+                    if err.kind() != io::ErrorKind::Interrupted || !reader.was_interrupted() {
                         error!("Reader encountered error: {}", err)
                     } else {
                         break 'outer
                     }
             }
-            if !self.core.is_alive() {
+            if !self.cmd_sender.is_alive() {
                 break
             }
         }
-        for line in self.reader.stop_log_senders() {
+        for line in reader.stop_log_senders() {
             print!("{}", line);
         }
+        logger::remove_log_sender();
         Ok(())
+    }
+    pub fn interrupt(&self) {
+        self.sender.lock().as_ref().map(|x| x.interrupt().ok());
     }
 }

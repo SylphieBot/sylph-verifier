@@ -8,7 +8,7 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 struct AtomicLogLevel(AtomicU8);
 impl AtomicLogLevel {
@@ -83,9 +83,22 @@ fn check_level(source: &str, level: LogLevel) -> bool {
     }
 }
 
+static LOG_SENDER_LOCKED: AtomicBool = AtomicBool::new(false);
 static LOG_SENDER: Mutex<Option<LogSender>> = Mutex::new(None);
 pub fn set_log_sender(sender: LogSender) {
-    *LOG_SENDER.lock() = Some(sender);
+    if !LOG_SENDER_LOCKED.load(Ordering::Relaxed) {
+        *LOG_SENDER.lock() = Some(sender);
+    }
+}
+pub fn lock_log_sender() {
+    if !LOG_SENDER_LOCKED.compare_and_swap(false, true, Ordering::Relaxed) {
+        *LOG_SENDER.lock() = None;
+    }
+}
+pub fn remove_log_sender() {
+    if !LOG_SENDER_LOCKED.load(Ordering::Relaxed) {
+        *LOG_SENDER.lock() = None;
+    }
 }
 
 #[cfg(windows)]

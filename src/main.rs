@@ -20,7 +20,6 @@ extern crate reqwest;
 extern crate serde_json;
 extern crate serenity;
 extern crate sha2;
-extern crate thread_id;
 extern crate uuid;
 
 #[allow(unused_extern_crates)] extern crate serde;
@@ -51,4 +50,5 @@ fn main() {
     println!();
 
     startup::start();
+    std::process::exit(0); // Just in case.
 }

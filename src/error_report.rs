@@ -2,7 +2,9 @@ use backtrace::Backtrace;
 use chrono::Utc;
 use error_chain::ChainedError;
 use errors::*;
+use logger;
 use parking_lot::RwLock;
+use parking_lot::deadlock::check_deadlock;
 use std::any::Any;
 use std::borrow::Cow;
 use std::fmt::{Write as FmtWrite};
@@ -11,42 +13,13 @@ use std::fs::File;
 use std::io::{Write as IoWrite};
 use std::panic::*;
 use std::path::{Path, PathBuf};
+use std::process::abort;
 use std::thread;
-use thread_id;
+use std::time::Duration;
 
 fn thread_name() -> String {
     thread::current().name().or(Some("<unknown>")).unwrap().to_string()
 }
-
-struct ThreadInfo {
-    thread_id: usize, thread_name: Option<String>,
-}
-impl ThreadInfo {
-    fn current() -> ThreadInfo {
-        ThreadInfo { thread_id: thread_id::get(), thread_name: Some(thread_name()) }
-    }
-    fn id_only(thread_id: usize) -> ThreadInfo {
-        ThreadInfo { thread_id, thread_name: None }
-    }
-}
-
-struct ReportBacktrace {
-    thread: ThreadInfo, backtrace: Backtrace,
-}
-impl ReportBacktrace {
-    fn from_stack() -> ReportBacktrace {
-        ReportBacktrace {
-            thread: ThreadInfo::current(), backtrace: Backtrace::new(),
-        }
-    }
-    fn from_error<E: ChainedError>(e: &E) -> ReportBacktrace {
-        ReportBacktrace {
-            thread: ThreadInfo::current(),
-            backtrace: e.backtrace().map_or_else(|| Backtrace::new(), |bt| bt.clone())
-        }
-    }
-}
-
 fn cause_from_error<E: ChainedError>(e: &E) -> Result<String> {
     let mut buf = String::new();
     writeln!(buf, "Thread {} errored with '{}'", thread_name(), e)?;
@@ -121,25 +94,31 @@ fn write_report(kind: &str, cause: &str, backtrace: &str, short_cause: bool) -> 
     Ok(())
 }
 
+fn report_err<E: ChainedError>(e: &E) -> Result<()> {
+    let cause = cause_from_error(e)?;
+    let backtrace = match e.backtrace() {
+        Some(bt) => format!("{:?}", bt),
+        None => format!("(from catch site)\n{:?}", Backtrace::new()),
+    };
+    write_report("Error", &cause, &backtrace, false)?;
+    Ok(())
+}
+
 pub fn init<P: AsRef<Path>>(root_path: P) {
     *ROOT_PATH.write() = Some(root_path.as_ref().to_owned());
+
     set_hook(Box::new(|panic_info| {
         let cause = cause_from_panic(panic_info.payload(), panic_info.location());
         let backtrace = format!("{:?}", Backtrace::new());
         write_report("Panic", &cause, &backtrace, false).expect("failed to write panic report!");
-    }))
+    }));
 }
 
 pub fn catch_error<F, T>(f: F) -> Result<T> where F: FnOnce() -> Result<T> {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(Ok(t)) => Ok(t),
         Ok(Err(e)) => {
-            let cause = cause_from_error(&e)?;
-            let backtrace = match e.backtrace() {
-                Some(bt) => format!("{:?}", bt),
-                None => format!("(from catch site)\n{:?}", Backtrace::new()),
-            };
-            write_report("Error", &cause, &backtrace, false)?;
+            report_err(&e)?;
             Err(e)
         }
         Err(_) => bail!(ErrorKind::Panicked),
