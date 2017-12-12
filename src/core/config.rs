@@ -55,8 +55,8 @@ macro_rules! config_keys {
 config_keys! {
     CommandPrefix<String>("!".to_owned());
     DiscordToken<Option<String>>(None);
-    TokenValiditySeconds<i32>(300);
-    ReverificationTimeout<u64>(600);
+    TokenValiditySeconds<i32>(60 * 5);
+    ReverificationTimeoutSeconds<u64>(60 * 30);
 }
 
 type ConfigValue = Option<Box<Any + Send + Sync + 'static>>;

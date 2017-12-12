@@ -2,6 +2,7 @@
 #![recursion_limit="128"]
 #![feature(box_syntax, box_patterns, never_type, integer_atomics,
            const_fn, const_atomic_u8_new, const_atomic_bool_new, const_atomic_usize_new)]
+#![deny(unused_must_use)]
 
 extern crate backtrace;
 extern crate byteorder;
