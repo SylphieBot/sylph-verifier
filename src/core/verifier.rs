@@ -181,29 +181,35 @@ impl TokenContext {
     }
     fn rekey(conn: &DatabaseConnection, time_increment: i32) -> Result<TokenContext> {
         info!("Regenerating token key due to user request.");
-        TokenContext::new_in_db(conn, time_increment, RekeyReason::ManualRekey)
+        conn.transaction_immediate(|| {
+            TokenContext::new_in_db(conn, time_increment, RekeyReason::ManualRekey)
+        })
     }
     fn from_db(conn: &DatabaseConnection, time_increment: i32) -> Result<TokenContext> {
-        match TokenContext::from_db_internal(conn)? {
-            Some(x) => {
-                if x.current.time_increment != time_increment {
-                    info!("Token key in database has a different time increment, regenerating...");
+        conn.transaction_immediate(|| {
+            match TokenContext::from_db_internal(conn)? {
+                Some(x) => {
+                    if x.current.time_increment != time_increment {
+                        info!("Token key in database has a different time increment, \
+                               regenerating...");
+                        TokenContext::new_in_db(conn, time_increment,
+                                                RekeyReason::TimeIncrementChanged)
+                    } else if x.current.version != TOKEN_VERSION {
+                        info!("Token key in database is for an older version, \
+                               regenerating...");
+                        TokenContext::new_in_db(conn, time_increment,
+                                                RekeyReason::OutdatedVersion)
+                    } else {
+                        Ok(x)
+                    }
+                },
+                None => {
+                    info!("No token keys in database, generating new key...");
                     TokenContext::new_in_db(conn, time_increment,
-                                            RekeyReason::TimeIncrementChanged)
-                } else if x.current.version != TOKEN_VERSION {
-                    info!("Token key in database is for an older version, regenerating...");
-                    TokenContext::new_in_db(conn, time_increment,
-                                            RekeyReason::OutdatedVersion)
-                } else {
-                    Ok(x)
-                }
-            },
-            None => {
-                info!("No token keys in database, generating new key...");
-                TokenContext::new_in_db(conn, time_increment,
-                                        RekeyReason::InitialKey)
-            },
-        }
+                                            RekeyReason::InitialKey)
+                },
+            }
+        })
     }
 
     fn check_token(&self, user: RobloxUserID, action: &str, token: &str) -> Result<TokenStatus> {
@@ -234,27 +240,26 @@ impl CustomDBType for RobloxUserID {
 custom_db_type!(RobloxUserID, roblox_user_id_mod, BigInt);
 
 pub struct Verifier {
-    database: Database, token_ctx: RwLock<Option<TokenContext>>,
+    config: ConfigManager, database: Database, token_ctx: RwLock<TokenContext>,
 }
 impl Verifier {
-    pub fn new(database: Database) -> Result<Verifier> {
-        Ok(Verifier { database, token_ctx: RwLock::new(None), })
+    pub fn new(config: ConfigManager, database: Database) -> Result<Verifier> {
+        let ctx = TokenContext::from_db(&database.connect()?,
+                                        config.get(None, ConfigKeys::TokenValiditySeconds)?)?;
+        Ok(Verifier { config, database, token_ctx: RwLock::new(ctx), })
     }
 
-    pub fn check_update(&self, core: &VerifierCore) -> Result<()> {
-        let ctx = TokenContext::from_db(&self.database.connect()?,
-                                        core.get_config(None, ConfigKeys::TokenValiditySeconds)?)?;
-        *self.token_ctx.write() = Some(ctx);
-        Ok(())
-    }
-    pub fn rekey(&self, core: &VerifierCore) -> Result<()> {
-        let db = self.database.connect()?;
-        db.transaction_immediate(|| {
-            let mut token_context = self.token_ctx.write();
-            let validity = core.get_config(None, ConfigKeys::TokenValiditySeconds)?;
-            *token_context = Some(TokenContext::rekey(&db, validity)?);
-            Ok(())
-        })
+    pub fn rekey(&self, force: bool) -> Result<bool> {
+        let mut lock = self.token_ctx.write();
+        let cur_id = lock.current.id;
+        *lock = if force {
+            TokenContext::rekey(&self.database.connect()?,
+                                self.config.get(None, ConfigKeys::TokenValiditySeconds)?)?
+        } else {
+            TokenContext::from_db(&self.database.connect()?,
+                                  self.config.get(None, ConfigKeys::TokenValiditySeconds)?)?
+        };
+        Ok(cur_id != lock.current.id)
     }
 
     pub fn get_verified_roblox_user(&self, user: UserId) -> Result<Option<RobloxUserID>> {
@@ -281,6 +286,6 @@ impl Verifier {
     }
 
     pub fn add_config<'a>(&self, config: &'a mut Vec<LuaConfigEntry>) {
-        self.token_ctx.read().as_ref().unwrap().current.add_config(config)
+        self.token_ctx.read().current.add_config(config)
     }
 }

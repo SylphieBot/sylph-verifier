@@ -58,7 +58,7 @@ impl EventHandler for Handler {
             None => return,
         };
         let prefix = error_report::catch_error(||
-            core.get_config(message.guild_id(), ConfigKeys::CommandPrefix)
+            core.config().get(message.guild_id(), ConfigKeys::CommandPrefix)
         );
         let prefix = match prefix {
             Ok(prefix) => prefix,
@@ -199,7 +199,7 @@ impl DiscordManager {
     pub fn connect(&mut self) -> Result<()> {
         self.check_bot_dead();
         if let &None = &self.bot {
-            match self.core.read().as_ref().unwrap().get_config(None, ConfigKeys::DiscordToken)? {
+            match self.core.read().as_ref().unwrap().config().get(None, ConfigKeys::DiscordToken)? {
                 Some(token) => {
                     let bot = DiscordBot::new(&token, self.core.clone())?;
                     bot.start()?;

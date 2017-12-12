@@ -10,6 +10,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::sync::Arc;
 
 // TODO: Get rid of Clone here?
 // TODO: Prevent per-guild cache from growing indefinitely.
@@ -17,7 +18,6 @@ use std::ops::Deref;
 struct ConfigKeyData<T> {
     // Storage related
     db_name: &'static str, default: fn() -> T, _phantom: PhantomData<(fn(T), fn() -> T)>,
-    change_hook: fn(&VerifierCore, Option<GuildId>, T) -> Result<()>,
 }
 
 pub struct ConfigKey<T: 'static>(&'static ConfigKeyData<T>);
@@ -30,17 +30,12 @@ impl <T> Copy for ConfigKey<T> { }
 
 pub enum ConfigKeys { }
 
-macro_rules! config_keys_change_hook {
-    ($change_hook:expr) => {$change_hook};
-    () => { |_, _, _| Ok(()) };
-}
 macro_rules! config_keys {
-    ($($name:ident<$tp:ty>($default:expr$(, $change_hook:expr)*);)*) => {
+    ($($name:ident<$tp:ty>($default:expr);)*) => {
         $(
             #[allow(non_upper_case_globals)]
             const $name: &'static ConfigKeyData<$tp> = &ConfigKeyData {
                 db_name: stringify!($name), _phantom: PhantomData, default: || $default,
-                change_hook: config_keys_change_hook!($($change_hook)*),
             };
         )*
 
@@ -60,7 +55,7 @@ macro_rules! config_keys {
 config_keys! {
     CommandPrefix<String>("!".to_owned());
     DiscordToken<Option<String>>(None);
-    TokenValiditySeconds<i32>(300, |ctx, _, _| ctx.rekey(false));
+    TokenValiditySeconds<i32>(300);
     ReverificationTimeout<u64>(600);
 }
 
@@ -81,14 +76,18 @@ impl ConfigCache {
     }
 }
 
-pub struct ConfigManager {
+struct ConfigManagerData {
+    database: Database,
     global_cache: ConfigCache, guild_cache: RwLock<HashMap<GuildId, ConfigCache>>,
 }
+
+#[derive(Clone)]
+pub struct ConfigManager(Arc<ConfigManagerData>);
 impl ConfigManager {
-    pub fn new() -> ConfigManager {
-        ConfigManager {
-            global_cache: ConfigCache::new(), guild_cache: RwLock::new(HashMap::new()),
-        }
+    pub fn new(database: Database) -> ConfigManager {
+        ConfigManager(Arc::new(ConfigManagerData {
+            database, global_cache: ConfigCache::new(), guild_cache: RwLock::new(HashMap::new()),
+        }))
     }
 
     fn get_db(&self, conn: &DatabaseConnection, guild: Option<GuildId>,
@@ -151,48 +150,48 @@ impl ConfigManager {
         match guild {
             Some(guild) => {
                 {
-                    if self.guild_cache.read().get(&guild).is_some() {
-                        return f(self.guild_cache.read().get(&guild).unwrap())
+                    if self.0.guild_cache.read().get(&guild).is_some() {
+                        return f(self.0.guild_cache.read().get(&guild).unwrap())
                     }
                 }
 
                 // None case
-                let mut guild_cache = self.guild_cache.write();
+                let mut guild_cache = self.0.guild_cache.write();
                 if guild_cache.get(&guild).is_none() {
                     guild_cache.insert(guild, ConfigCache::new());
                 }
                 f(guild_cache.get(&guild).unwrap())
             }
-            None => f(&self.global_cache),
+            None => f(&self.0.global_cache),
         }
     }
 
     pub fn set<T : Serialize + Clone + Any + Send + Sync>(
-        &self, core: &VerifierCore, conn: &DatabaseConnection, guild: Option<GuildId>,
-        key: ConfigKey<T>, val: T,
+        &self, guild: Option<GuildId>, key: ConfigKey<T>, val: T,
     ) -> Result<()> {
         self.get_cache(guild, |cache| {
+            let conn = self.0.database.connect()?;
             let mut cache = cache.get(key).write();
-            self.set_db(conn, guild, key.0.db_name, &serde_json::to_string(&val)?)?;
+            self.set_db(&conn, guild, key.0.db_name, &serde_json::to_string(&val)?)?;
             *cache = Some(Box::new(val.clone()));
-            (key.0.change_hook)(core, guild, val)
+            Ok(())
         })
     }
     pub fn reset<T: Clone + Any + Send + Sync>(
-        &self, core: &VerifierCore, conn: &DatabaseConnection, guild: Option<GuildId>,
-        key: ConfigKey<T>
+        &self, guild: Option<GuildId>, key: ConfigKey<T>
     ) -> Result<()> {
         self.get_cache(guild, |cache| {
+            let conn = self.0.database.connect()?;
             let mut cache = cache.get(key).write();
-            self.reset_db(conn, guild, key.0.db_name)?;
+            self.reset_db(&conn, guild, key.0.db_name)?;
             let val = (key.0.default)();
             *cache = Some(Box::new(val.clone()));
-            (key.0.change_hook)(core, guild, val)
+            Ok(())
         })
     }
-    pub fn get<T : Serialize + DeserializeOwned + Clone + Any + Send + Sync>(
-        &self, conn: &DatabaseConnection, guild: Option<GuildId>,
-        key: ConfigKey<T>
+
+    fn get_internal<T : Serialize + DeserializeOwned + Clone + Any + Send + Sync>(
+        &self, conn: &DatabaseConnection, guild: Option<GuildId>, key: ConfigKey<T>
     ) -> Result<T> {
         self.get_cache(guild, |cache| {
             let lock = cache.get(key);
@@ -205,7 +204,7 @@ impl ConfigManager {
 
             // None case
             match guild {
-                Some(_) => self.get(conn, None, key),
+                Some(_) => self.get_internal(conn, None, key),
                 None => {
                     let mut cache = lock.write();
                     if cache.is_some() {
@@ -224,5 +223,10 @@ impl ConfigManager {
                 }
             }
         })
+    }
+    pub fn get<T : Serialize + DeserializeOwned + Clone + Any + Send + Sync>(
+        &self, guild: Option<GuildId>, key: ConfigKey<T>
+    ) -> Result<T> {
+        self.get_internal(&self.0.database.connect()?, guild, key)
     }
 }

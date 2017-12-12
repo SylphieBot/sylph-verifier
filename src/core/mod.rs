@@ -25,11 +25,10 @@ mod discord;
 mod terminal;
 mod verifier;
 
-pub use self::config::{ConfigKey, ConfigKeys};
+pub use self::config::{ConfigManager, ConfigKey, ConfigKeys};
 pub use self::database::{DatabaseConnection, schema};
 pub use self::verifier::{TokenStatus, RekeyReason};
 
-use self::config::ConfigManager;
 use self::database::Database;
 use self::discord::DiscordManager;
 use self::verifier::Verifier;
@@ -51,8 +50,6 @@ fn in_path<P: AsRef<Path>>(root_path: P, file: &str) -> PathBuf {
     path
 }
 
-static VERIFIER_CORE_CREATED: AtomicBool = AtomicBool::new(false);
-
 const STATUS_NOT_INIT: u8 = 0;
 const STATUS_STARTING: u8 = 1;
 const STATUS_RUNNING : u8 = 2;
@@ -70,9 +67,6 @@ pub struct VerifierCore(Arc<VerifierCoreData>);
 impl VerifierCore {
     pub fn new<P1: AsRef<Path>, P2: AsRef<Path>>(root_path: P1,
                                                  db_path: Option<P2>) -> Result<VerifierCore> {
-        ensure!(!VERIFIER_CORE_CREATED.swap(true, Ordering::Relaxed),
-                "Cannot create multiple VerifierCores.");
-
         let root_path = root_path.as_ref();
         let db_path = db_path.map_or_else(|| in_path(root_path, DB_FILE_NAME),
                                           |x| x.as_ref().into());
@@ -85,14 +79,14 @@ impl VerifierCore {
             }
         };
         let database = Database::new(db_path)?;
-        let verifier = Verifier::new(database.clone())?;
+        let config = ConfigManager::new(database.clone());
+        let verifier = Verifier::new(config.clone(), database.clone())?;
         let core = VerifierCore(Arc::new(VerifierCoreData {
             root_path: root_path.to_owned(), shutdown_sender: Mutex::new(None),
             status: AtomicU8::new(STATUS_NOT_INIT),
-            _lock: lock, database, config: ConfigManager::new(),
+            _lock: lock, database, config,
             verifier, discord: Mutex::new(DiscordManager::new()),
         }));
-        core.0.verifier.check_update(&core)?;
         core.0.discord.lock().set_core(&core);
         Ok(core)
     }
@@ -149,39 +143,11 @@ impl VerifierCore {
         self.0.status.load(Ordering::Relaxed) == STATUS_RUNNING
     }
 
-    pub fn get_verified_roblox_user(&self, user: UserId) -> Result<Option<RobloxUserID>> {
-        self.0.verifier.get_verified_roblox_user(user)
+    pub fn config(&self) -> &ConfigManager {
+        &self.0.config
     }
-    pub fn get_verified_discord_user(&self, user: RobloxUserID) -> Result<Option<UserId>> {
-        self.0.verifier.get_verified_discord_user(user)
-    }
-    pub fn try_verify(
-        &self, discord_id: UserId, roblox_id: RobloxUserID, token: &str
-    ) -> Result<TokenStatus> {
-        self.0.verifier.try_verify(discord_id, roblox_id, token)
-    }
-    pub fn rekey(&self, force: bool) -> Result<()> {
-        if force {
-            self.0.verifier.rekey(self)
-        } else {
-            self.0.verifier.check_update(self)
-        }
-    }
-
-    pub fn set_config<T: Serialize + DeserializeOwned + Clone + Any + Send + Sync>(
-        &self, guild: Option<GuildId>, key: ConfigKey<T>, value: T
-    ) -> Result<()> {
-        self.0.config.set(self, &self.0.database.connect()?, guild, key, value)
-    }
-    pub fn reset_config<T: Serialize + DeserializeOwned + Clone + Any + Send + Sync>(
-        &self, guild: Option<GuildId>, key: ConfigKey<T>
-    ) -> Result<()> {
-        self.0.config.reset(self, &self.0.database.connect()?, guild, key)
-    }
-    pub fn get_config<T: Serialize + DeserializeOwned + Clone + Any + Send + Sync>(
-        &self, guild: Option<GuildId>, key: ConfigKey<T>
-    ) -> Result<T> {
-        self.0.config.get(&self.0.database.connect()?, guild, key)
+    pub fn verifier(&self) -> &Verifier {
+        &self.0.verifier
     }
 
     pub fn connect_discord(&self) -> Result<()> {

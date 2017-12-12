@@ -15,7 +15,8 @@ struct ConfigOption {
 
 macro_rules! config_values {
     ($($config_name:ident<$tp:ty>(
-        $config_key:ident, $allow_guild:expr, $help:expr, $from_str:expr, $to_str:expr
+        $config_key:ident, $allow_guild:expr, $help:expr,
+        $from_str:expr, $to_str:expr, $after_update:expr $(,)*
     );)*) => {
         static CONFIG_OPTION_LIST: &'static [ConfigOption] = &[
             $(
@@ -26,14 +27,16 @@ macro_rules! config_values {
                         match val {
                             Some(str) => {
                                 const FROM_STR: fn(&str) -> Result<$tp> = $from_str;
-                                ctx.core.set_config(guild, key, FROM_STR(str)?)
+                                ctx.core.config().set(guild, key, FROM_STR(str)?)?
                             }
-                            None => ctx.core.reset_config(guild, key),
+                            None => ctx.core.config().reset(guild, key)?,
                         }
+                        const AFTER_UPDATE: fn(&CommandContext) -> Result<()> = $after_update;
+                        Ok(())
                     },
                     get_config: |ctx, guild| {
                         let key = ConfigKeys::$config_key;
-                        let val = ctx.core.get_config(guild, key)?;
+                        let val = ctx.core.config().get(guild, key)?;
                         const TO_STR: fn($tp) -> Result<String> = $to_str;
                         TO_STR(val)
                     },
@@ -44,10 +47,11 @@ macro_rules! config_values {
 }
 config_values! {
     prefix<String>(CommandPrefix, true, "The prefix used before commands.",
-                   |x| Ok(x.to_owned()), |x| Ok(x));
+                   |x| Ok(x.to_owned()), |x| Ok(x), |_| Ok(()));
     token<Option<String>>(DiscordToken, false, "The bot token used to connect to Discord.",
                           |x| Ok(Some(x.to_owned())),
-                          |x| Ok(x.map_or("(not set)", |_| "<token redacted>").to_owned()));
+                          |x| Ok(x.map_or("(not set)", |_| "<token redacted>").to_owned()),
+                          |_| Ok(()));
 }
 lazy_static! {
     static ref CONFIG_OPTIONS: HashMap<&'static str, &'static ConfigOption> = {
