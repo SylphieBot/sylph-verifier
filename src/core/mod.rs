@@ -1,14 +1,9 @@
-// TODO: Refactor, restructure, and clean up this module.
-
 use commands::*;
 use errors::*;
-use fs2::*;
-use linefeed::reader::LogSender;
 use parking_lot::*;
 use roblox::*;
 use serenity::model::UserId;
-use std::fs::{File, OpenOptions};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread;
@@ -29,23 +24,6 @@ use self::database::Database;
 use self::discord::DiscordManager;
 use self::terminal::Terminal;
 use self::verifier::Verifier;
-
-const LOCK_FILE_NAME: &'static str = "Sylph-Verifier.lock";
-const DB_FILE_NAME: &'static str = "Sylph-Verifier.db";
-
-fn check_lock<P: AsRef<Path>>(path: P) -> Result<File> {
-    let mut options = OpenOptions::new();
-    options.create(true).read(true).write(true);
-    let lock_file = options.open(path)?;
-    lock_file.try_lock_exclusive()?;
-    Ok(lock_file)
-}
-fn in_path<P: AsRef<Path>>(root_path: P, file: &str) -> PathBuf {
-    let mut path = PathBuf::new();
-    path.push(root_path);
-    path.push(file);
-    path
-}
 
 #[derive(Clone)]
 struct CommandSender(Arc<RwLock<Option<VerifierCore>>>);
@@ -86,28 +64,15 @@ const STATUS_UNINIT  : u8 = 4;
 
 struct VerifierCoreData {
     status: AtomicU8,
-    _lock: File, database: Database, config: ConfigManager, cmd_sender: CommandSender,
+    database: Database, config: ConfigManager, cmd_sender: CommandSender,
     terminal: Terminal, verifier: Verifier, discord: Mutex<DiscordManager>,
 }
 
 #[derive(Clone)]
 pub struct VerifierCore(Arc<VerifierCoreData>);
 impl VerifierCore {
-    pub fn new<P1: AsRef<Path>, P2: AsRef<Path>>(root_path: P1,
-                                                 db_path: Option<P2>) -> Result<VerifierCore> {
-        let root_path = root_path.as_ref();
-        let db_path = db_path.map_or_else(|| in_path(root_path, DB_FILE_NAME),
-                                          |x| x.as_ref().into());
-
-        let lock = match check_lock(in_path(root_path, LOCK_FILE_NAME)) {
-            Ok(lock) => lock,
-            Err(err) => {
-                error!("Only one instance of Sylph-Verifier may be launched at once.");
-                return Err(err)
-            }
-        };
-
-        let database = Database::new(db_path)?;
+    pub fn new<P: AsRef<Path>>(db_path: P) -> Result<VerifierCore> {
+        let database = Database::new(db_path.as_ref())?;
         let config = ConfigManager::new(database.clone());
         let cmd_sender = CommandSender::new();
 
@@ -117,8 +82,7 @@ impl VerifierCore {
 
         let core = VerifierCore(Arc::new(VerifierCoreData {
             status: AtomicU8::new(STATUS_NOT_INIT),
-            _lock: lock, database, config, cmd_sender,
-            terminal, verifier, discord,
+            database, config, cmd_sender, terminal, verifier, discord,
         }));
         core.0.cmd_sender.init(&core);
         Ok(core)

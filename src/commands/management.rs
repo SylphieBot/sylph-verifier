@@ -26,19 +26,19 @@ macro_rules! config_values {
                         let key = ConfigKeys::$config_key;
                         match val {
                             Some(str) => {
-                                const FROM_STR: fn(&str) -> Result<$tp> = $from_str;
-                                ctx.core.config().set(guild, key, FROM_STR(str)?)?
+                                let from_str: fn(&str) -> Result<$tp> = $from_str;
+                                ctx.core.config().set(guild, key, from_str(str)?)?
                             }
                             None => ctx.core.config().reset(guild, key)?,
                         }
-                        const AFTER_UPDATE: fn(&CommandContext) -> Result<()> = $after_update;
-                        Ok(())
+                        let after_update: fn(&CommandContext) -> Result<()> = $after_update;
+                        after_update(ctx)
                     },
                     get_config: |ctx, guild| {
                         let key = ConfigKeys::$config_key;
                         let val = ctx.core.config().get(guild, key)?;
-                        const TO_STR: fn($tp) -> Result<String> = $to_str;
-                        TO_STR(val)
+                        let to_str: fn($tp) -> Result<String> = $to_str;
+                        to_str(val)
                     },
                 },
             )*

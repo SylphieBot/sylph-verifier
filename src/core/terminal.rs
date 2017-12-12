@@ -1,7 +1,6 @@
 use commands::*;
 use core::*;
 use error_report;
-use errors::*;
 use linefeed::*;
 use linefeed::reader::LogSender;
 use logger;

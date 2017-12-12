@@ -2,9 +2,29 @@ use core::*;
 use dotenv;
 use error_report;
 use errors::*;
+use fs2::*;
 use logger;
 use std::env;
-use std::path::PathBuf;
+use std::fs::{File, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::process::abort;
+
+const LOCK_FILE_NAME: &'static str = "Sylph-Verifier.lock";
+const DB_FILE_NAME: &'static str = "Sylph-Verifier.db";
+
+fn check_lock<P: AsRef<Path>>(path: P) -> Result<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).read(true).write(true);
+    let lock_file = options.open(path)?;
+    lock_file.try_lock_exclusive()?;
+    Ok(lock_file)
+}
+fn in_path<P: AsRef<Path>>(root_path: P, file: &str) -> PathBuf {
+    let mut path = PathBuf::new();
+    path.push(root_path);
+    path.push(file);
+    path
+}
 
 pub fn start() {
     // Setup .env for development builds.
@@ -32,10 +52,19 @@ pub fn start() {
         path
     };
     let db_path = if is_dev_mode {
-        Some(PathBuf::from(env::var_os("DATABASE_URL")
-            .expect("cannot get DATABASE_URL environment variable")))
+        PathBuf::from(env::var_os("DATABASE_URL")
+            .expect("cannot get DATABASE_URL environment variable"))
     } else {
-        None
+        in_path(&root_path, DB_FILE_NAME)
+    };
+
+    // Acquire the lock file.
+    let _lock = match check_lock(in_path(&root_path, LOCK_FILE_NAME)) {
+        Ok(lock) => lock,
+        Err(err) => {
+            println!("Only one instance of Sylph-Verifier may be launched at once.");
+            abort()
+        }
     };
 
     // Setup logging
@@ -44,7 +73,7 @@ pub fn start() {
 
     // Start bot proper
     error_report::catch_error(move || {
-        let core = VerifierCore::new(root_path, db_path)?;
+        let core = VerifierCore::new(db_path)?;
         core.start()?;
         Ok(())
     }).ok();
