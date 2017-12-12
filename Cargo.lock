@@ -1230,7 +1230,7 @@ dependencies = [
 [[package]]
 name = "serenity"
 version = "0.5.0"
-source = "git+https://github.com/zeyla/serenity.git?branch=v0.5.0#2be880c0b067c4119cb8c3afbe1be01e2a2f0969"
+source = "git+https://github.com/zeyla/serenity.git?branch=v0.5.0#b26e1c4644fc2307b1da4f8fd3b1c68fc2004b8e"
 dependencies = [
  "base64 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitflags 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1311,6 +1311,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "sylph-verifier"
 version = "0.1.0"
 dependencies = [
+ "backtrace 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "constant_time_eq 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1342,6 +1343,7 @@ dependencies = [
  "serde_json 1.0.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "serenity 0.5.0 (git+https://github.com/zeyla/serenity.git?branch=v0.5.0)",
  "sha2 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "thread-id 3.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "uuid 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 

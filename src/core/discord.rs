@@ -1,6 +1,7 @@
 use commands::*;
 use core::*;
 use core::database::*;
+use error_report;
 use parking_lot::{Mutex, RwLock};
 use serenity::Client;
 use serenity::client::bridge::gateway::ShardManager;
@@ -56,7 +57,7 @@ impl EventHandler for Handler {
             Some(core) => core,
             None => return,
         };
-        let prefix = core.catch_error(||
+        let prefix = error_report::catch_error(||
             core.get_config(message.guild_id(), ConfigKeys::CommandPrefix)
         );
         let prefix = match prefix {
@@ -80,7 +81,7 @@ impl EventHandler for Handler {
 
         if let Some(content) = content {
             if let Some(command) = get_command(content) {
-                core.catch_error(|| {
+                error_report::catch_error(|| {
                     if let Some(ch) = message.channel() {
                         let (privilege_level, command_target, context_str) = match ch {
                             Channel::Guild(ch) => {
@@ -149,7 +150,7 @@ impl DiscordBot {
         })?;
         thread::Builder::new().name("discord thread".to_string()).spawn(move || {
             let core = core.read().as_ref().unwrap().clone();
-            core.catch_error(|| {
+            error_report::catch_error(|| {
                 *data.shard_manager.lock() = Some(client.shard_manager.clone());
                 match client.start_autosharded() {
                     Ok(_) | Err(SerenityError::Client(ClientError::Shutdown)) => { }

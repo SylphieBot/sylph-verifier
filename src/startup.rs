@@ -1,5 +1,6 @@
 use core::*;
 use dotenv;
+use error_report;
 use errors::*;
 use logger;
 use std::env;
@@ -39,10 +40,12 @@ pub fn start() {
 
     // Setup logging
     logger::init(&root_path).expect("failed to setup logging");
+    error_report::init(&root_path);
 
-    // Init core
-    let core = VerifierCore::new(root_path, db_path).expect("failed to initialize core");
-
-    // Start bot
-    core.start().unwrap();
+    // Start bot proper
+    error_report::catch_error(move || {
+        let core = VerifierCore::new(root_path, db_path)?;
+        core.start()?;
+        Ok(())
+    }).ok();
 }

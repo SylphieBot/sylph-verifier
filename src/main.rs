@@ -3,6 +3,7 @@
 #![feature(box_syntax, box_patterns, never_type, integer_atomics,
            const_fn, const_atomic_u8_new, const_atomic_bool_new, const_atomic_usize_new)]
 
+extern crate backtrace;
 extern crate byteorder;
 extern crate chrono;
 extern crate constant_time_eq;
@@ -19,6 +20,7 @@ extern crate reqwest;
 extern crate serde_json;
 extern crate serenity;
 extern crate sha2;
+extern crate thread_id;
 extern crate uuid;
 
 #[allow(unused_extern_crates)] extern crate serde;
@@ -38,6 +40,7 @@ extern crate uuid;
 
 mod commands;
 mod core;
+mod error_report;
 mod logger;
 mod roblox;
 mod startup;

@@ -1,5 +1,6 @@
 use core::*;
 use enumset::EnumSet;
+use error_report;
 use errors::*;
 use regex::Regex;
 use serenity::model::*;
@@ -274,7 +275,7 @@ impl <'a> CommandContext<'a> {
         r
     }
     fn catch_error<F, T>(&self, f: F) -> Result<T> where F: FnOnce() -> Result<T> {
-        self.report_error(self.core.catch_error(|| -> Result<Result<T>> {
+        self.report_error(error_report::catch_error(|| -> Result<Result<T>> {
             match f() {
                 Err(Error(box (ErrorKind::CommandError(err), _))) => {
                     self.respond(&err)?;

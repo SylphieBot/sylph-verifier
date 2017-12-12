@@ -1,5 +1,6 @@
 // TODO: Refactor, restructure, and clean up this module.
 
+use error_report::*;
 use errors::*;
 use fs2::*;
 use linefeed::reader::LogSender;
@@ -11,7 +12,6 @@ use serenity::model::{UserId, GuildId};
 use std::any::Any;
 use std::fs::{File, OpenOptions};
 use std::mem::drop;
-use std::panic::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -22,7 +22,6 @@ use std::time::{Duration, Instant};
 
 mod config;
 mod discord;
-mod error_report;
 mod terminal;
 mod verifier;
 
@@ -75,29 +74,27 @@ impl VerifierCore {
                 "Cannot create multiple VerifierCores.");
 
         let root_path = root_path.as_ref();
-        error_report::init_panic_hook();
         let db_path = db_path.map_or_else(|| in_path(root_path, DB_FILE_NAME),
                                           |x| x.as_ref().into());
-        error_report::report_error(root_path, error_report::catch_panic(root_path, move || {
-            let lock = match check_lock(in_path(root_path, LOCK_FILE_NAME)) {
-                Ok(lock) => lock,
-                Err(err) => {
-                    error!("Only one instance of Sylph-Verifier may be launched at once.");
-                    return Err(err)
-                }
-            };
-            let database = Database::new(db_path)?;
-            let verifier = Verifier::new(database.clone())?;
-            let core = VerifierCore(Arc::new(VerifierCoreData {
-                root_path: root_path.to_owned(), shutdown_sender: Mutex::new(None),
-                status: AtomicU8::new(STATUS_NOT_INIT),
-                _lock: lock, database, config: ConfigManager::new(),
-                verifier, discord: Mutex::new(DiscordManager::new()),
-            }));
-            core.0.verifier.check_update(&core)?;
-            core.0.discord.lock().set_core(&core);
-            Ok(core)
-        })?)
+
+        let lock = match check_lock(in_path(root_path, LOCK_FILE_NAME)) {
+            Ok(lock) => lock,
+            Err(err) => {
+                error!("Only one instance of Sylph-Verifier may be launched at once.");
+                return Err(err)
+            }
+        };
+        let database = Database::new(db_path)?;
+        let verifier = Verifier::new(database.clone())?;
+        let core = VerifierCore(Arc::new(VerifierCoreData {
+            root_path: root_path.to_owned(), shutdown_sender: Mutex::new(None),
+            status: AtomicU8::new(STATUS_NOT_INIT),
+            _lock: lock, database, config: ConfigManager::new(),
+            verifier, discord: Mutex::new(DiscordManager::new()),
+        }));
+        core.0.verifier.check_update(&core)?;
+        core.0.discord.lock().set_core(&core);
+        Ok(core)
     }
     pub fn start(self) -> Result<()> {
         // TODO: Do better error handling in this.
@@ -209,24 +206,5 @@ impl VerifierCore {
         config.push(LuaConfigEntry::new("background_image", false, None as Option<&str>));
         self.0.verifier.add_config(&mut config);
         config
-    }
-
-    pub fn catch_panic<F, R>(&self, f: F) -> Result<R> where F: FnOnce() -> R {
-        error_report::catch_panic(&self.0.root_path, AssertUnwindSafe(f))
-    }
-    pub fn catch_error<F, T>(&self, f: F) -> Result<T> where F: FnOnce() -> Result<T> {
-        self.catch_panic(||
-            error_report::report_error(&self.0.root_path, f())
-        )?
-    }
-}
-
-// Utility function
-pub trait UnwrapReport<T> {
-    fn unwrap_report(self) -> T;
-}
-impl <T> UnwrapReport<T> for Result<T> {
-    fn unwrap_report(self) -> T {
-        error_report::unwrap_fatal(self)
     }
 }

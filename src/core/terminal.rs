@@ -1,5 +1,6 @@
 use commands::*;
 use core::VerifierCore;
+use error_report;
 use errors::*;
 use linefeed::*;
 use linefeed::reader::LogSender;
@@ -57,7 +58,7 @@ impl <'a> Terminal<'a> {
         'outer: loop {
             match self.reader.read_line() {
                 Ok(ReadResult::Input(line)) => {
-                    self.core.catch_error(|| {
+                    error_report::catch_error(|| {
                         let line = line.trim();
 
                         info!(target: "$command_input", "{}", line);
