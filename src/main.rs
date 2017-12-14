@@ -1,6 +1,6 @@
 #![warn(unused_extern_crates)]
 #![recursion_limit="128"]
-#![feature(box_syntax, box_patterns, never_type, integer_atomics,
+#![feature(box_syntax, box_patterns, never_type, integer_atomics, optin_builtin_traits,
            const_fn, const_atomic_u8_new, const_atomic_bool_new, const_atomic_usize_new)]
 #![deny(unused_must_use)]
 
@@ -44,6 +44,7 @@ mod error_report;
 mod logger;
 mod roblox;
 mod startup;
+mod util;
 
 fn main() {
     println!("Sylph-Verifier v{} by LymeeFairy", env!("CARGO_PKG_VERSION"));

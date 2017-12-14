@@ -1,11 +1,14 @@
 use commands::*;
-use core::*;
+use core::CommandSender;
+use core::config::*;
+use errors::*;
 use error_report;
 use parking_lot::{Mutex, RwLock};
 use serenity::Client;
 use serenity::client::bridge::gateway::ShardManager;
 use serenity::model::*;
 use serenity::prelude::*;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;
 
@@ -53,7 +56,7 @@ impl EventHandler for Handler {
 
     fn message(&self, ctx: Context, message: Message) {
         let prefix = error_report::catch_error(||
-            self.config.get(message.guild_id(), ConfigKeys::CommandPrefix)
+            self.config.get(None, ConfigKeys::CommandPrefix)
         );
         let prefix = match prefix {
             Ok(prefix) => prefix,

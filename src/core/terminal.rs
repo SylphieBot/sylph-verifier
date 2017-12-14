@@ -1,6 +1,7 @@
 use commands::*;
-use core::*;
+use core::CommandSender;
 use error_report;
+use errors::*;
 use linefeed::*;
 use linefeed::reader::LogSender;
 use logger;
@@ -43,7 +44,7 @@ impl Terminal {
     pub(in ::core) fn new(cmd_sender: CommandSender) -> Result<Terminal> {
         Ok(Terminal { cmd_sender, sender: Mutex::new(None) })
     }
-    pub fn start(&self) -> Result<()> {
+    pub fn open(&self) -> Result<()> {
         let mut reader = Reader::new("sylph-verifier")?;
         reader.set_prompt("sylph-verifier> ");
         reader.set_history_size(1000);

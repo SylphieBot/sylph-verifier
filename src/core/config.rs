@@ -1,6 +1,8 @@
-use core::*;
-use core::schema::*;
+use core::database::*;
+use core::database::schema::*;
+use diesel;
 use diesel::prelude::*;
+use errors::*;
 use parking_lot::RwLock;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -53,10 +55,18 @@ macro_rules! config_keys {
 }
 
 config_keys! {
+    // Discord settings
     CommandPrefix<String>("!".to_owned());
     DiscordToken<Option<String>>(None);
+
+    // Verification settings
+    VerificationAttemptLimit<u32>(10);
+    VerificationCooldownSeconds<u64>(60 * 60 * 24);
+
     TokenValiditySeconds<i32>(60 * 5);
-    ReverificationTimeoutSeconds<u64>(60 * 30);
+
+    AllowReverification<bool>(true);
+    ReverificationTimeoutSeconds<u64>(0);
 }
 
 type ConfigValue = Option<Box<Any + Send + Sync + 'static>>;
@@ -98,26 +108,26 @@ impl ConfigManager {
                     .filter(guild_config::discord_guild_id.eq(guild.0 as i64)
                         .or(guild_config::key             .eq(key)))
                     .select(guild_config::value)
-                    .load::<String>(conn.deref())?.into_iter().next(),
+                    .get_result(conn.deref()).optional()?,
             None =>
                  global_config::table
                     .filter(global_config::key.eq(key))
                     .select(global_config::value)
-                    .load::<String>(conn.deref())?.into_iter().next(),
+                    .get_result(conn.deref()).optional()?,
         })
     }
     fn set_db(&self, conn: &DatabaseConnection, guild: Option<GuildId>,
               key: &str, value: &str) -> Result<()> {
         match guild {
             Some(guild) => {
-                ::diesel::replace_into(guild_config::table).values((
+                diesel::replace_into(guild_config::table).values((
                     guild_config::discord_guild_id.eq(guild.0 as i64),
                     guild_config::key             .eq(key),
                     guild_config::value           .eq(value),
                 )).execute(conn.deref())?;
             }
             None => {
-                ::diesel::replace_into(global_config::table).values((
+                diesel::replace_into(global_config::table).values((
                     global_config::key  .eq(key),
                     global_config::value.eq(value),
                 )).execute(conn.deref())?;
@@ -129,14 +139,14 @@ impl ConfigManager {
                 key: &str) -> Result<()> {
         match guild {
             Some(guild) => {
-                ::diesel::delete(
+                diesel::delete(
                     guild_config::table
                         .filter(guild_config::discord_guild_id.eq(guild.0 as i64)
                            .and(guild_config::key             .eq(key)))
                 ).execute(conn.deref())?;
             }
             None => {
-                ::diesel::delete(
+                diesel::delete(
                     global_config::table.filter(global_config::key.eq(key))
                 ).execute(conn.deref())?;
             }
@@ -149,10 +159,8 @@ impl ConfigManager {
     ) -> T where F: FnOnce(&ConfigCache) -> T {
         match guild {
             Some(guild) => {
-                {
-                    if self.0.guild_cache.read().get(&guild).is_some() {
-                        return f(self.0.guild_cache.read().get(&guild).unwrap())
-                    }
+                if self.0.guild_cache.read().get(&guild).is_some() {
+                    return f(self.0.guild_cache.read().get(&guild).unwrap())
                 }
 
                 // None case
@@ -196,10 +204,8 @@ impl ConfigManager {
         self.get_cache(guild, |cache| {
             let lock = cache.get(key);
 
-            {
-                if let &Some(ref any) = &*lock.read() {
-                    return Ok(Any::downcast_ref::<T>(any.deref()).unwrap().clone())
-                }
+            if let &Some(ref any) = &*lock.read() {
+                return Ok(Any::downcast_ref::<T>(any.deref()).unwrap().clone())
             }
 
             // None case

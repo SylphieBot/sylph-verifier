@@ -18,7 +18,7 @@ backtrace = "0.3"
 byteorder = "1.1"
 chrono = { version = "0.4", features = ["serde"] }
 constant_time_eq = "0.1"
-diesel = { version = "0.99", features = ["sqlite"] }
+diesel = { version = "0.99", features = ["sqlite", "chrono"] }
 diesel_derives = { version = "0.99", features = ["sqlite"] }
 diesel_infer_schema = { version = "0.99", features = ["sqlite"] }
 diesel_migrations = { version = "0.99", features = ["sqlite"] }
@@ -31,7 +31,7 @@ lazy_static = "1.0"
 libc = "0.2"
 libsqlite3-sys = { version = "0.8", features = ["bundled"] }
 linefeed = { version = "0.3", git = "https://github.com/Lymia/linefeed.git", branch = "concurrent-loggers" }
-log = "0.3"
+log = { version = "0.4.0-rc.1", features = ["std"] }
 lz4-sys = "1.8"
 nom = { version = "3.2", features = ["regexp", "regexp_macros", "verbose-errors"] }
 parking_lot = { version = "0.5", features = ["nightly", "deadlock_detection"] }

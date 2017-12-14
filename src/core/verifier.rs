@@ -1,10 +1,11 @@
+use chrono::{Utc, DateTime, NaiveDateTime, Duration};
 use constant_time_eq::constant_time_eq;
-use core::*;
+use core::config::*;
 use core::database::*;
-use core::schema::*;
+use core::database::schema::*;
+use diesel;
 use diesel::dsl::count_star;
 use diesel::prelude::*;
-use diesel::types::*;
 use errors::*;
 use hmac::{Hmac, Mac};
 use parking_lot::RwLock;
@@ -14,7 +15,8 @@ use serenity::model::*;
 use sha2::Sha256;
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter, Write, Result as FmtResult};
-use std::time::*;
+use std::time::{SystemTime, UNIX_EPOCH};
+use util;
 
 const TOKEN_CHARS: &'static [u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const TOKEN_VERSION: i32 = 1;
@@ -29,7 +31,9 @@ impl Token {
 
     fn from_str(token: &str) -> Result<Token> {
         let token = token.as_bytes();
-        ensure!(token.len() == 6, "Token must be exactly 6 characters.");
+        cmd_ensure!(token.len() == 6,
+                    "Verification token must be exactly 6 characters. Please check your \
+                     command and try again");
 
         let mut chars = [0u8; 6];
         for i in 0..6 {
@@ -39,7 +43,8 @@ impl Token {
             } else if byte >= 'a' as u8 && byte <= 'z' as u8 {
                 chars[i] = byte - 'a' as u8 + 'A' as u8
             } else {
-                bail!("Token may only contain letters.")
+                cmd_error!("Verification tokens may only contain letters. Please check your \
+                            command and try again.")
             }
         }
         Ok(Token(chars))
@@ -120,16 +125,19 @@ impl TokenParameters {
         Token::from_arr(chars)
     }
 
-    fn make_token(&self, user_id: u64, action: &str, epoch: i64) -> Result<Token> {
-        Ok(self.sha256_token(&format!("{}|{}|{}|{}", TOKEN_VERSION, user_id, action, epoch)))
+    fn current_epoch(&self) -> Result<i64> {
+        let unix_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        Ok((unix_time / self.time_increment as u64) as i64)
     }
 
-    fn check_token(&self, user: RobloxUserID, action: &str, token: &Token) -> Result<Option<i64>> {
-        let unix_time = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-        let epoch = (unix_time / self.time_increment as u64) as i64;
+    fn make_token(&self, user_id: u64, epoch: i64) -> Result<Token> {
+        Ok(self.sha256_token(&format!("{}|{}|{}", TOKEN_VERSION, user_id, epoch)))
+    }
 
+    fn check_token(&self, user: RobloxUserID, token: &Token) -> Result<Option<i64>> {
+        let epoch = self.current_epoch()?;
         for i in &[1, 0, -1] {
-            if token == &self.make_token(user.0, action, epoch + i)? {
+            if token == &self.make_token(user.0, epoch + i)? {
                 return Ok(Some(epoch + i))
             }
         }
@@ -139,9 +147,7 @@ impl TokenParameters {
 
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub enum TokenStatus {
-    Verified { key_id: i32, epoch: i64 },
-    TokenAlreadyUsed, Outdated(RekeyReason), NotVerified,
-    DiscordIDAlreadyVerified, RobloxIDAlreadyVerified,
+    Verified { key_id: i32, epoch: i64 }, Outdated(RekeyReason), NotVerified,
 }
 
 struct TokenContext {
@@ -171,7 +177,7 @@ impl TokenContext {
             key.push((r >> 24) as u8);
         }
 
-        ::diesel::insert_into(roblox_verification_keys::table).values((
+        diesel::insert_into(roblox_verification_keys::table).values((
             roblox_verification_keys::key           .eq(key),
             roblox_verification_keys::time_increment.eq(time_increment),
             roblox_verification_keys::version       .eq(TOKEN_VERSION),
@@ -212,13 +218,13 @@ impl TokenContext {
         })
     }
 
-    fn check_token(&self, user: RobloxUserID, action: &str, token: &str) -> Result<TokenStatus> {
+    fn check_token(&self, user: RobloxUserID, token: &str) -> Result<TokenStatus> {
         let token = Token::from_str(token)?;
-        if let Some(epoch) = self.current.check_token(user, action, &token)? {
+        if let Some(epoch) = self.current.check_token(user, &token)? {
             return Ok(TokenStatus::Verified { key_id: self.current.id, epoch })
         }
         for param in &self.history {
-            if param.check_token(user, action, &token)?.is_some() {
+            if param.check_token(user, &token)?.is_some() {
                 return Ok(TokenStatus::Outdated(self.current.change_reason.clone()))
             }
         }
@@ -267,22 +273,143 @@ impl Verifier {
         Ok(discord_user_info::table
             .filter(discord_user_info::discord_user_id.eq(user.0 as i64))
             .select(discord_user_info::roblox_user_id)
-            .load(conn.deref())?.into_iter().next().and_then(|x| x))
+            .get_result(conn.deref()).optional()?.and_then(|x| x))
     }
     pub fn get_verified_discord_user(&self, user: RobloxUserID) -> Result<Option<UserId>> {
         let conn = self.database.connect()?;
         Ok(discord_user_info::table
             .filter(discord_user_info::roblox_user_id.eq(user))
             .select(discord_user_info::discord_user_id)
-            .load::<i64>(conn.deref())?.into_iter().next().map(|x| UserId(x as u64)))
+            .get_result::<i64>(conn.deref()).optional()?.map(|x| UserId(x as u64)))
     }
     pub fn try_verify(
-        &self, discord_id: UserId, roblox_id: RobloxUserID, token: &str
-    ) -> Result<TokenStatus> {
+        &self, discord_id: UserId, roblox_id: RobloxUserID, token: &str,
+    ) -> Result<()> {
         let conn = self.database.connect()?;
+
+        // Check cooldown
         conn.transaction_immediate(|| {
-            unimplemented!()
-        })
+            let attempt_info = roblox_verification_cooldown::table
+                .filter(roblox_verification_cooldown::discord_user_id.eq(discord_id.0 as i64))
+                .select((roblox_verification_cooldown::attempt_count,
+                         roblox_verification_cooldown::last_attempt))
+                .get_result::<(i32, NaiveDateTime)>(conn.deref()).optional()?;
+            let mut new_attempt_count = 1;
+            if let Some((attempt_count, last_attempt)) = attempt_info {
+                let max_attempts = self.config.get(None, ConfigKeys::VerificationAttemptLimit)?;
+                let cooldown = self.config.get(None, ConfigKeys::VerificationCooldownSeconds)?;
+                let cooldown_ends = DateTime::from_utc(last_attempt, Utc) +
+                                    Duration::seconds(cooldown as i64);
+                let now = Utc::now();
+                if attempt_count as u32 >= max_attempts && now < cooldown_ends {
+                    let time_left = cooldown_ends.signed_duration_since(now);
+                    cmd_error!("You cannot make made more than {} verification attempts \
+                                within {}. Please try again in {}.",
+                               max_attempts,
+                               util::to_english_time(cooldown),
+                               util::to_english_time(time_left.num_seconds() as u64));
+                }
+                new_attempt_count = attempt_count + 1;
+            }
+            diesel::replace_into(roblox_verification_cooldown::table).values((
+                roblox_verification_cooldown::discord_user_id.eq(discord_id.0 as i64),
+                roblox_verification_cooldown::attempt_count  .eq(new_attempt_count),
+            )).execute(conn.deref())?;
+            Ok(())
+        })?;
+
+        // Check token
+        conn.transaction_immediate(|| {
+            let token_ctx = self.token_ctx.read();
+            match token_ctx.check_token(roblox_id, token)? {
+                TokenStatus::Verified { key_id, epoch } => {
+                    let last_key = roblox_user_info::table
+                        .filter(roblox_user_info::roblox_user_id.eq(roblox_id))
+                        .select((roblox_user_info::last_key_id, roblox_user_info::last_key_epoch))
+                        .get_result::<(i32, i64)>(conn.deref()).optional()?;
+                    if let Some((last_id, last_epoch)) = last_key {
+                        if last_id >= key_id && last_epoch >= epoch {
+                            cmd_error!("An verfication attempt has already been made with the \
+                                        token you used. Please wait for a new key to be generated \
+                                        to try again.")
+                        }
+                    }
+                    diesel::replace_into(roblox_user_info::table).values((
+                        roblox_user_info::roblox_user_id.eq(roblox_id),
+                        roblox_user_info::last_key_id   .eq(key_id),
+                        roblox_user_info::last_key_epoch.eq(epoch),
+                    )).execute(conn.deref())?;
+                }
+                TokenStatus::Outdated(rekey_reason) => {
+                    cmd_error!("The verification place has not been updated with the verification \
+                                bot, and verifications cannot be completed at this time moment. \
+                                Please ask the bot owner to fix this problem.")
+                }
+                TokenStatus::NotVerified => {
+                    cmd_error!("That token is not valid or has already expired. Please check your \
+                                command and try again.")
+                }
+            }
+            Ok(())
+        })?;
+
+        // Attempt to verify user
+        conn.transaction_immediate(|| {
+            let allow_reverification = self.config.get(None, ConfigKeys::AllowReverification)?;
+
+            if !allow_reverification {
+                let verified_as = discord_user_info::table
+                    .filter(discord_user_info::discord_user_id.eq(discord_id.0 as i64))
+                    .select(discord_user_info::roblox_user_id)
+                    .get_result::<Option<RobloxUserID>>(conn.deref()).optional()?.and_then(|x| x);
+                if let Some(roblox_id) = verified_as {
+                    cmd_error!("You are already verified as {}.",
+                               roblox_id.lookup_username()?);
+                }
+
+                let roblox_count = discord_user_info::table
+                    .filter(discord_user_info::roblox_user_id.eq(roblox_id))
+                    .select(count_star()).get_result::<i64>(conn.deref())?;
+                if roblox_count != 0 {
+                    cmd_error!("Someone else is already verified as {}.",
+                               roblox_id.lookup_username()?);
+                }
+            } else {
+                let last_verify = discord_user_info::table
+                    .filter(discord_user_info::discord_user_id.eq(discord_id.0 as i64))
+                    .select(discord_user_info::last_updated)
+                    .get_result::<NaiveDateTime>(conn.deref()).optional()?;
+                if let Some(last_updated) = last_verify {
+                    let now = Utc::now();
+                    let reverify_timeout =
+                        self.config.get(None, ConfigKeys::ReverificationTimeoutSeconds)?;
+                    let cooldown_ends = DateTime::<Utc>::from_utc(last_updated, Utc) +
+                                        Duration::seconds(reverify_timeout as i64);
+                    if now < cooldown_ends {
+                        let time_left = cooldown_ends.signed_duration_since(now);
+                        cmd_error!("You cannot reverify more than once every {}. Please wait {} \
+                                    before trying again.",
+                                   util::to_english_time(reverify_timeout),
+                                   util::to_english_time(time_left.num_seconds() as u64))
+                    }
+
+                    diesel::update(discord_user_info::table
+                        .filter(discord_user_info::roblox_user_id.eq(roblox_id))
+                    ).set(
+                        discord_user_info::roblox_user_id.eq(None::<RobloxUserID>)
+                    ).execute(conn.deref())?;
+                }
+            }
+
+            diesel::replace_into(discord_user_info::table).values((
+                discord_user_info::discord_user_id.eq(discord_id.0 as i64),
+                discord_user_info::roblox_user_id .eq(roblox_id)
+            )).execute(conn.deref())?;
+
+            Ok(())
+        })?;
+
+        Ok(())
     }
 
     pub fn add_config<'a>(&self, config: &'a mut Vec<LuaConfigEntry>) {

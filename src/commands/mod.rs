@@ -94,16 +94,11 @@ discord_permissions! {
     ManageEmojis       => MANAGE_EMOJIS,
 }
 
-pub struct CooldownInfo {
-    pub ident: &'static str, pub message: &'static str,
-    pub max_attempts: u32, pub cooldown_secs: u32, pub database_backed: bool,
-}
-
 pub struct Command {
     name: &'static str, help_args: Option<&'static str>, help_desc: Option<&'static str>,
     required_privilege: PrivilegeLevel, allowed_contexts: EnumSet<CommandTarget>,
     discord_permissions: EnumSet<DiscordPermission>, pub no_threading: bool,
-    command_fn: Option<CommandFn>,
+    hidden: bool, command_fn: Option<CommandFn>,
 }
 impl Command {
     pub(self) const fn new(name: &'static str) -> Command {
@@ -114,7 +109,7 @@ impl Command {
             allowed_contexts: enum_set!(CommandTarget::Terminal |
                                         CommandTarget::ServerMessage |
                                         CommandTarget::PrivateMessage),
-            no_threading: false, command_fn: None,
+            no_threading: false, hidden: false, command_fn: None,
         }
     }
     pub(self) const fn help(self, args: Option<&'static str>, desc: &'static str) -> Command {
@@ -129,6 +124,9 @@ impl Command {
     }
     pub(self) const fn allowed_contexts(self, contexts: EnumSet<CommandTarget>) -> Command {
         Command { allowed_contexts: contexts, ..self }
+    }
+    pub(self) const fn hidden(self) -> Command {
+        Command { hidden: true, ..self }
     }
     pub(self) const fn terminal_only(self) -> Command {
         Command {
@@ -387,7 +385,8 @@ static CORE_COMMANDS: &'static [Command] = &[
             let mut buffer = String::new();
             writeln!(buffer, "Command list: ([optional parameter], <required parameter>)")?;
             for command in COMMANDS.command_list() {
-                if ctx.privilege_level >= command.required_privilege &&
+                if !command.hidden &&
+                   ctx.privilege_level >= command.required_privilege &&
                    command.allowed_contexts.contains(ctx.command_target) &&
                    ctx.has_discord_permissions(command.discord_permissions) {
                     writeln!(buffer, "• {}{}{}{}",

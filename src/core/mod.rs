@@ -2,7 +2,7 @@ use commands::*;
 use errors::*;
 use parking_lot::*;
 use roblox::*;
-use serenity::model::UserId;
+use std::mem::drop;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -17,55 +17,57 @@ mod terminal;
 mod verifier;
 
 pub use self::config::{ConfigManager, ConfigKey, ConfigKeys};
-pub use self::database::{DatabaseConnection, schema};
-pub use self::verifier::{TokenStatus, RekeyReason};
+pub use self::verifier::{Verifier, TokenStatus, RekeyReason};
 
 use self::database::Database;
 use self::discord::DiscordManager;
 use self::terminal::Terminal;
-use self::verifier::Verifier;
 
-#[derive(Clone)]
-struct CommandSender(Arc<RwLock<Option<VerifierCore>>>);
-impl CommandSender {
-    fn new() -> CommandSender {
-        CommandSender(Arc::new(RwLock::new(None)))
-    }
-    fn init(&self, core: &VerifierCore) {
-        *self.0.write() = Some(core.clone())
-    }
-    pub fn run_command(&self, command: &Command, ctx: &CommandContextData) {
-        let core = self.0.read().as_ref().cloned();
-        match core {
-            Some(core) => command.run(ctx, &core),
-            None => {
-                ctx.respond("The bot is currently shutting down. Please wait until it is \
-                                 restarted.", true).ok();
-            }
-        }
-    }
-    pub fn is_alive(&self) -> bool {
-        if let Some(core) = self.0.read().as_ref() {
-            core.is_alive()
-        } else {
-            false
-        }
-    }
-    fn shutdown(&self) {
-        *self.0.write() = None
-    }
-}
-
-const STATUS_NOT_INIT: u8 = 0;
-const STATUS_STARTING: u8 = 1;
-const STATUS_RUNNING : u8 = 2;
-const STATUS_SHUTDOWN: u8 = 3;
-const STATUS_UNINIT  : u8 = 4;
+const STATUS_STOPPED : u8 = 0;
+const STATUS_RUNNING : u8 = 1;
+const STATUS_STOPPING: u8 = 2;
 
 struct VerifierCoreData {
     status: AtomicU8,
     database: Database, config: ConfigManager, cmd_sender: CommandSender,
     terminal: Terminal, verifier: Verifier, discord: Mutex<DiscordManager>,
+}
+
+struct CommandSenderActiveGuard<'a>(&'a CommandSender);
+impl <'a> Drop for CommandSenderActiveGuard<'a> {
+    fn drop(&mut self) {
+        *(self.0).0.write() = None
+    }
+}
+
+#[derive(Clone)]
+struct CommandSender(Arc<RwLock<Option<Arc<VerifierCoreData>>>>);
+impl CommandSender {
+    fn new() -> CommandSender {
+        CommandSender(Arc::new(RwLock::new(None)))
+    }
+    fn activate(&self, core: &Arc<VerifierCoreData>) -> CommandSenderActiveGuard {
+        *self.0.write() = Some(core.clone());
+        CommandSenderActiveGuard(self)
+    }
+
+    pub fn is_alive(&self) -> bool {
+        if let Some(core) = self.0.read().as_ref() {
+            core.status.load(Ordering::Relaxed) == STATUS_RUNNING
+        } else {
+            false
+        }
+    }
+    pub fn run_command(&self, command: &Command, ctx: &CommandContextData) {
+        let core = self.0.read().as_ref().map(|x| VerifierCore(x.clone()));
+        match core {
+            Some(core) => command.run(ctx, &core),
+            None => {
+                ctx.respond("The bot is currently shutting down. Please wait until it is \
+                             restarted.", true).ok();
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -80,27 +82,12 @@ impl VerifierCore {
         let verifier = Verifier::new(config.clone(), database.clone())?;
         let discord = Mutex::new(DiscordManager::new(config.clone(), cmd_sender.clone()));
 
-        let core = VerifierCore(Arc::new(VerifierCoreData {
-            status: AtomicU8::new(STATUS_NOT_INIT),
+        Ok(VerifierCore(Arc::new(VerifierCoreData {
+            status: AtomicU8::new(STATUS_STOPPED),
             database, config, cmd_sender, terminal, verifier, discord,
-        }));
-        core.0.cmd_sender.init(&core);
-        Ok(core)
+        })))
     }
-    pub fn start(self) -> Result<()> {
-        // TODO: Do better error handling in this.
-        ensure!(self.0.status.compare_and_swap(STATUS_NOT_INIT, STATUS_STARTING,
-                                               Ordering::Relaxed) == STATUS_NOT_INIT,
-                "VerifierCore already running.");
-        self.connect_discord()?;
-        ensure!(self.0.status.compare_and_swap(STATUS_STARTING, STATUS_RUNNING,
-                                               Ordering::Relaxed) == STATUS_STARTING,
-                "VerifierCore status corrupted: expected STATUS_STARTING");
-        self.0.terminal.start()?;
-        ensure!(self.0.status.load(Ordering::Relaxed) == STATUS_SHUTDOWN,
-                "Terminal interrupted without initializing shutdown!");
-        self.0.cmd_sender.shutdown();
-        self.0.discord.lock().shutdown()?;
+    fn wait_on_instances(&self) {
         let mut next_message = Instant::now() + Duration::from_secs(1);
         let mut printed_waiting = false;
         loop {
@@ -117,26 +104,34 @@ impl VerifierCore {
         if printed_waiting {
             info!("All threads stopped. Shutting down.")
         }
-        ensure!(self.0.status.compare_and_swap(STATUS_SHUTDOWN, STATUS_UNINIT,
-                                               Ordering::Relaxed) == STATUS_SHUTDOWN,
-                "VerifierCore status corrupted: expected STATUS_SHUTDOWN");
+    }
+    pub fn start(&self) -> Result<()> {
+        ensure!(self.0.status.compare_and_swap(STATUS_STOPPED, STATUS_RUNNING,
+                                               Ordering::Relaxed) == STATUS_STOPPED,
+                "VerifierCore already running.");
+        let cmd_guard = self.0.cmd_sender.activate(&self.0);
+        self.connect_discord()?;
+        self.0.terminal.open()?;
+        ensure!(self.0.status.load(Ordering::Relaxed) == STATUS_STOPPING,
+                "Terminal interrupted without initializing shutdown!");
+        drop(cmd_guard);
+        self.0.discord.lock().shutdown()?;
+        self.wait_on_instances();
+        ensure!(self.0.status.compare_and_swap(STATUS_STOPPING, STATUS_STOPPED,
+                                               Ordering::Relaxed) == STATUS_STOPPING,
+                "VerifierCore not currently stopping??");
         Ok(())
     }
     pub fn shutdown(&self) -> Result<()> {
-        match self.0.status.compare_and_swap(STATUS_RUNNING, STATUS_SHUTDOWN, Ordering::Relaxed) {
-            STATUS_NOT_INIT => bail!("VerifierCore not started yet."),
-            STATUS_STARTING => bail!("VerifierCore not fully started yet."),
+        match self.0.status.compare_and_swap(STATUS_RUNNING, STATUS_STOPPING, Ordering::Relaxed) {
+            STATUS_STOPPED  => bail!("VerifierCore not started yet."),
             STATUS_RUNNING  => {
                 self.0.terminal.interrupt();
                 Ok(())
             },
-            STATUS_SHUTDOWN => bail!("VerifierCore already shutting down."),
-            STATUS_UNINIT   => bail!("VerifierCore already shut down."),
+            STATUS_STOPPING => bail!("VerifierCore already shutting down."),
             _               => unreachable!(),
         }
-    }
-    pub fn is_alive(&self) -> bool {
-        self.0.status.load(Ordering::Relaxed) == STATUS_RUNNING
     }
 
     pub fn config(&self) -> &ConfigManager {
@@ -156,7 +151,7 @@ impl VerifierCore {
         self.0.discord.lock().reconnect()
     }
 
-    pub fn place_config(&self) -> Vec<LuaConfigEntry> {
+    pub fn place_config(&self) -> Result<Vec<LuaConfigEntry>> {
         let mut config = Vec::new();
         // TODO: Make these dynamic from configuration.
         config.push(LuaConfigEntry::new("title", false, "Roblox Account Verifier"));
@@ -164,9 +159,13 @@ impl VerifierCore {
             To verify your Roblox account on <Discord Server Name>, please enter the following \
             command in the #<channel name> channel.\
         "));
-        config.push(LuaConfigEntry::new("bot_prefix", false, "!"));
+        config.push(LuaConfigEntry::new("bot_prefix", false,
+                                        self.config().get(None, ConfigKeys::CommandPrefix)?));
         config.push(LuaConfigEntry::new("background_image", false, None as Option<&str>));
         self.0.verifier.add_config(&mut config);
-        config
+        Ok(config)
     }
 }
+
+// This allows start() to safely take &self rather than self.
+impl !Sync for VerifierCore { }

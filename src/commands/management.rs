@@ -1,7 +1,5 @@
 use super::*;
 
-use log::LogLevelFilter;
-use logger;
 use std::process::exit;
 
 const LOG_LEVEL_FILTER_ERROR: &'static str =
@@ -46,7 +44,7 @@ macro_rules! config_values {
     }
 }
 config_values! {
-    prefix<String>(CommandPrefix, true, "The prefix used before commands.",
+    prefix<String>(CommandPrefix, false, "The prefix used before commands.",
                    |x| Ok(x.to_owned()), |x| Ok(x), |_| Ok(()));
     token<Option<String>>(DiscordToken, false, "The bot token used to connect to Discord.",
                           |x| Ok(Some(x.to_owned())),
@@ -121,16 +119,6 @@ pub const COMMANDS: &'static [Command] = &[
             }
             Ok(())
         }),
-    Command::new("set_log_level")
-        .help(Some("<log level> [library log level]"), "Sets the logging level.")
-        .terminal_only()
-        .exec(|ctx| {
-            let app_level = ctx.arg::<LogLevelFilter>(0, LOG_LEVEL_FILTER_ERROR)?;
-            let lib_level = ctx.arg_opt::<LogLevelFilter>(1, LOG_LEVEL_FILTER_ERROR)?
-                .unwrap_or(app_level);
-            logger::set_filter_level(app_level, lib_level);
-            Ok(())
-        }),
 
     // Configuration
     Command::new("set")
@@ -161,4 +149,16 @@ pub const COMMANDS: &'static [Command] = &[
         .exec(|ctx| {
             ctx.core.reconnect_discord()
         }),
+
+    // Debugging command
+    Command::new("debug_cmd")
+        .hidden()
+        .terminal_only()
+        .exec(|ctx| {
+            match ctx.arg_raw(0)? {
+                "error" => bail!("debug error"),
+                "panic" => panic!("debug panic"),
+                _ => cmd_error!("unknown debugging command"),
+            }
+        })
 ];

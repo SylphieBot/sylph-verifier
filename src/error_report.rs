@@ -46,8 +46,11 @@ fn write_report_file<P: AsRef<Path>>(root_path: P, kind: &str, report: &str) -> 
     fs::create_dir_all(&path)?;
     let file_name = format!("{}_report_{}.log", kind, Utc::now().format("%Y%m%d_%H%M%S%f"));
     path.push(file_name);
+
     let mut out = File::create(&path)?;
-    out.write_all(report.as_bytes())?;
+    #[cfg(windows)] out.write_all(report.replace("\n", "\r\n").as_bytes())?;
+    #[cfg(not(windows))] out.write_all(report.as_bytes())?;
+
     Ok(path)
 }
 
