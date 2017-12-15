@@ -8,7 +8,6 @@ extern crate backtrace;
 extern crate byteorder;
 extern crate chrono;
 extern crate constant_time_eq;
-extern crate dotenv;
 extern crate fs2;
 extern crate hmac;
 extern crate linefeed;

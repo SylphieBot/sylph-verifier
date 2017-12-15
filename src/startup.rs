@@ -1,5 +1,4 @@
 use core::*;
-use dotenv;
 use error_report;
 use errors::*;
 use fs2::*;
@@ -26,10 +25,38 @@ fn in_path<P: AsRef<Path>>(root_path: P, file: &str) -> PathBuf {
     path
 }
 
-pub fn start() {
-    // Setup .env for development builds.
-    dotenv::dotenv().ok();
+fn get_exe_dir() -> PathBuf {
+    let mut path = env::current_exe().expect("cannot get current exe path");
+    path.pop();
+    path
+}
+macro_rules! check_env {
+    ($e:expr) => { env::var($e).ok().map_or(false, |x| x == env!($e)) }
+}
+fn is_cargo_launch() -> bool {
+    check_env!("CARGO_PKG_NAME") && check_env!("CARGO_PKG_VERSION") && env::var("CARGO").is_ok()
+}
+fn get_root_path() -> PathBuf {
+    if is_cargo_launch() {
+        match env::var_os("CARGO_MANIFEST_DIR") {
+            Some(manifest_dir) => {
+                let buf = PathBuf::from(manifest_dir);
+                let mut toml_file = buf.clone();
+                toml_file.push("Cargo.toml");
+                if toml_file.exists() {
+                    buf
+                } else {
+                    get_exe_dir()
+                }
+            }
+            None => get_exe_dir()
+        }
+    } else {
+        get_exe_dir()
+    }
+}
 
+pub fn start() {
     // Get RUST_BACKTRACE=1 cached by error_chain.
     let original = env::var_os("RUST_BACKTRACE");
     env::set_var("RUST_BACKTRACE", "1");
@@ -40,23 +67,8 @@ pub fn start() {
     }
 
     // Find paths
-    let is_dev_mode = match env::var("SYLPH_VERIFIER_DEV_MODE") {
-        Ok(s) => s == "true",
-        Err(_) => false,
-    };
-    let root_path = if is_dev_mode {
-        env::current_dir().expect("cannot get current directory")
-    } else {
-        let mut path = env::current_exe().expect("cannot get current exe path");
-        path.pop();
-        path
-    };
-    let db_path = if is_dev_mode {
-        PathBuf::from(env::var_os("DATABASE_URL")
-            .expect("cannot get DATABASE_URL environment variable"))
-    } else {
-        in_path(&root_path, DB_FILE_NAME)
-    };
+    let root_path = get_root_path();
+    let db_path = in_path(&root_path, DB_FILE_NAME);
 
     // Acquire the lock file.
     let _lock = match check_lock(in_path(&root_path, LOCK_FILE_NAME)) {
@@ -73,6 +85,8 @@ pub fn start() {
 
     // Start bot proper
     error_report::catch_error(move || {
+        debug!("Root directory: {}", root_path.display());
+
         let core = VerifierCore::new(db_path)?;
         core.start()?;
         Ok(())
