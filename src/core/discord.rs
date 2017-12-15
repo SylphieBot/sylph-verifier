@@ -8,6 +8,7 @@ use serenity::Client;
 use serenity::client::bridge::gateway::ShardManager;
 use serenity::model::*;
 use serenity::prelude::*;
+use std::mem::drop;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;
@@ -46,8 +47,24 @@ impl <'a> CommandContextData for DiscordContext<'a> {
     }
 }
 
+const STATUS_NOT_INIT: u8 = 0;
+const STATUS_RUNNING : u8 = 1;
+const STATUS_SHUTDOWN: u8 = 2;
+const STATUS_DROPPED : u8 = 3;
+
+struct DiscordBotData {
+    shard_manager: Mutex<Option<Arc<Mutex<ShardManager>>>>, status: AtomicU8,
+}
+
 struct Handler {
     config: ConfigManager, cmd_sender: CommandSender, user_prefix: RwLock<Option<String>>,
+    data: Arc<DiscordBotData>,
+}
+impl Drop for Handler {
+    fn drop(&mut self) {
+        info!("Discord event handler shut down.");
+        self.data.status.compare_and_swap(STATUS_SHUTDOWN, STATUS_DROPPED, Ordering::Relaxed);
+    }
 }
 impl EventHandler for Handler {
     fn ready(&self, _: Context, ready: Ready) {
@@ -118,13 +135,6 @@ impl EventHandler for Handler {
     }
 }
 
-const STATUS_NOT_INIT: u8 = 0;
-const STATUS_RUNNING : u8 = 1;
-const STATUS_SHUTDOWN: u8 = 2;
-
-struct DiscordBotData {
-    shard_manager: Mutex<Option<Arc<Mutex<ShardManager>>>>, status: AtomicU8,
-}
 struct DiscordBot {
     token: String, config: ConfigManager, cmd_sender: CommandSender, data: Arc<DiscordBotData>,
 }
@@ -140,23 +150,22 @@ impl DiscordBot {
     fn start(&self) -> Result<()> {
         ensure!(self.data.status.compare_and_swap(STATUS_NOT_INIT, STATUS_RUNNING,
                                                   Ordering::Relaxed) == STATUS_NOT_INIT,
-                "Discord component started twice!");
+                "Discord component already started!");
         let data = self.data.clone();
         let mut client = Client::new(&self.token, Handler {
             config: self.config.clone(), cmd_sender: self.cmd_sender.clone(),
-            user_prefix: RwLock::new(None)
+            user_prefix: RwLock::new(None), data: data.clone(),
         })?;
         thread::Builder::new().name("discord thread".to_string()).spawn(move || {
             error_report::catch_error(|| {
                 *data.shard_manager.lock() = Some(client.shard_manager.clone());
+                drop(data);
                 match client.start_autosharded() {
                     Ok(_) | Err(SerenityError::Client(ClientError::Shutdown)) => { }
                     Err(err) => bail!(err),
                 }
                 Ok(())
             }).ok();
-            info!("Discord connection terminated.");
-            data.status.compare_and_swap(STATUS_RUNNING, STATUS_SHUTDOWN, Ordering::Relaxed);
         })?;
         Ok(())
     }
@@ -166,6 +175,9 @@ impl DiscordBot {
             STATUS_NOT_INIT => bail!("Not yet connected to Discord!"),
             STATUS_RUNNING  => {
                 self.data.shard_manager.lock().as_ref().map(|x| x.lock().shutdown_all());
+                while self.data.status.load(Ordering::Relaxed) != STATUS_DROPPED {
+                    thread::yield_now()
+                }
             },
             STATUS_SHUTDOWN => { }
             _               => unreachable!(),

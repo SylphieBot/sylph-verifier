@@ -85,10 +85,10 @@ pub fn start() {
 
     // Start bot proper
     error_report::catch_error(move || {
-        debug!("Root directory: {}", root_path.display());
+        trace!("Root directory: {}", root_path.display());
+        trace!("Database path: {}", db_path.display());
 
-        let core = VerifierCore::new(db_path)?;
-        core.start()?;
+        VerifierCore::new(db_path)?.start()?;
         Ok(())
     }).ok();
 }

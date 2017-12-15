@@ -108,7 +108,7 @@ impl VerifierCore {
     pub fn start(&self) -> Result<()> {
         ensure!(self.0.status.compare_and_swap(STATUS_STOPPED, STATUS_RUNNING,
                                                Ordering::Relaxed) == STATUS_STOPPED,
-                "VerifierCore already running.");
+                "VerifierCore already started.");
         let cmd_guard = self.0.cmd_sender.activate(&self.0);
         self.connect_discord()?;
         self.0.terminal.open()?;
@@ -119,7 +119,7 @@ impl VerifierCore {
         self.wait_on_instances();
         ensure!(self.0.status.compare_and_swap(STATUS_STOPPING, STATUS_STOPPED,
                                                Ordering::Relaxed) == STATUS_STOPPING,
-                "VerifierCore not currently stopping??");
+                "VerifierCore not currently stopping?");
         Ok(())
     }
     pub fn shutdown(&self) -> Result<()> {

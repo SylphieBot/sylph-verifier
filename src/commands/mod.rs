@@ -263,20 +263,18 @@ impl <'a> CommandContext<'a> {
     }
 
     fn catch_error<F, T>(&self, f: F) -> Result<T> where F: FnOnce() -> Result<T> {
-        error_report::catch_error(|| -> Result<Result<T>> {
-            match f() {
-                Err(Error(box (ErrorKind::CommandError(err), _))) => {
-                    self.respond(&err)?;
-                    Ok(Err(Error::from_kind(ErrorKind::CommandError(err))))
-                }
-                Ok(x) => Ok(Ok(x)),
-                Err(e) => {
-                    self.respond("The command encountered an unknown error. \
-                                  Please contact the bot owner.")?;
-                    Err(e)
-                },
+        match error_report::catch_error(|| Ok(f())) {
+            Ok(Ok(x)) => Ok(x),
+            Ok(Err(Error(box (ErrorKind::CommandError(err), _)))) => {
+                self.respond(&err)?;
+                bail!(ErrorKind::CommandError(err))
             }
-        })?
+            Err(e) | Ok(Err(e)) => {
+                self.respond("The command encountered an unknown error. \
+                              Please contact the bot owner.")?;
+                Err(e)
+            }
+        }
     }
 
     pub fn ensure_option<T, S: AsRef<str>>(&self, o: Option<T>, s: S) -> Result<T> {
