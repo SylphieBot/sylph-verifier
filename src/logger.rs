@@ -11,17 +11,17 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 struct LogPolicy {
-    module: &'static str, console: LevelFilter, log: LevelFilter,
+    module: &'static str, console: LogLevelFilter, log: LogLevelFilter,
 }
 impl LogPolicy {
-    const fn new(module: &'static str, console: LevelFilter, log: LevelFilter) -> LogPolicy {
+    const fn new(module: &'static str, console: LogLevelFilter, log: LogLevelFilter) -> LogPolicy {
         LogPolicy { module, console, log }
     }
 }
 static LOG_POLICY: &'static [LogPolicy] = &[
-    LogPolicy::new("sylph_verifier", LevelFilter::Info, LevelFilter::Trace),
-    LogPolicy::new("hyper"         , LevelFilter::Info, LevelFilter::Info),
-    LogPolicy::new("*"             , LevelFilter::Info, LevelFilter::Debug),
+    LogPolicy::new("sylph_verifier", LogLevelFilter::Info, LogLevelFilter::Trace),
+    LogPolicy::new("hyper"         , LogLevelFilter::Info, LogLevelFilter::Info),
+    LogPolicy::new("*"             , LogLevelFilter::Info, LogLevelFilter::Debug),
 ];
 
 fn is_in_module(module: &str, path: &str) -> bool {
@@ -38,8 +38,8 @@ fn source_info(source: &str) -> &'static LogPolicy {
     }
     unreachable!() // due to the "*" entry
 }
-fn logs(filter: LevelFilter, level: Level) -> bool {
-    match filter.to_level() {
+fn logs(filter: LogLevelFilter, level: LogLevel) -> bool {
+    match filter.to_log_level() {
         None => false,
         Some(filter) => filter >= level,
     }
@@ -132,14 +132,14 @@ fn log_raw(line: &str) {
     }
 }
 impl Log for Logger {
-    fn enabled(&self, metadata: &Metadata) -> bool {
+    fn enabled(&self, metadata: &LogMetadata) -> bool {
         let info = source_info(metadata.target());
         let level = metadata.level();
 
         logs(info.console, level) || logs(info.log, level)
     }
 
-    fn log(&self, record: &Record) {
+    fn log(&self, record: &LogRecord) {
         let info = source_info(record.target());
         let level = record.level();
         let log_console = logs(info.console, level);
@@ -167,8 +167,6 @@ impl Log for Logger {
             }
         }
     }
-
-    fn flush(&self) { }
 }
 
 pub fn init<P: AsRef<Path>>(root_path: P) -> Result<()> {
@@ -176,10 +174,12 @@ pub fn init<P: AsRef<Path>>(root_path: P) -> Result<()> {
     log_dir.push("logs");
     fs::create_dir_all(&log_dir)?;
 
-    set_max_level(LevelFilter::Trace);
     LOG_FILE.lock().log(&log_dir, &format!("===== Starting logging at {} =====",
                                            Local::now().format("%Y-%m-%d %H:%M:%S")))?;
-    set_boxed_logger(box Logger { log_dir }).expect("failed to init logger!");
+    set_logger(|max_level| {
+        max_level.set(LogLevelFilter::Trace);
+        box Logger { log_dir }
+    }).expect("failed to init logger!");
 
     Ok(())
 }
