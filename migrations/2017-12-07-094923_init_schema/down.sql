@@ -1,9 +1,0 @@
-DROP TABLE discord_active_verifications;
-DROP TABLE discord_user_info;
-DROP TABLE roblox_user_info;
-DROP TABLE roblox_verification_cooldown;
-DROP TABLE roblox_verification_keys;
-DROP TABLE discord_active_roles;
-DROP TABLE discord_custom_roles;
-DROP TABLE guild_config;
-DROP TABLE global_config;

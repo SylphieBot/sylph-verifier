@@ -2,13 +2,12 @@ use chrono::{Date, Local};
 use errors::*;
 use linefeed::reader::LogSender;
 use log::*;
-use parking_lot::{Mutex, RwLock};
-use std::cmp::max;
+use parking_lot::Mutex;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 struct LogPolicy {
     module: &'static str, console: LogLevelFilter, log: LogLevelFilter,

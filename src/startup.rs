@@ -73,7 +73,7 @@ pub fn start() {
     // Acquire the lock file.
     let _lock = match check_lock(in_path(&root_path, LOCK_FILE_NAME)) {
         Ok(lock) => lock,
-        Err(err) => {
+        Err(_) => {
             println!("Only one instance of Sylph-Verifier may be launched at once.");
             abort()
         }
@@ -85,8 +85,8 @@ pub fn start() {
 
     // Start bot proper
     error_report::catch_error(move || {
-        trace!("Root directory: {}", root_path.display());
-        trace!("Database path: {}", db_path.display());
+        debug!("Root directory: {}", root_path.display());
+        debug!("Database path: {}", db_path.display());
 
         VerifierCore::new(db_path)?.start()?;
         Ok(())

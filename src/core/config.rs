@@ -1,7 +1,4 @@
 use core::database::*;
-use core::database::schema::*;
-use diesel;
-use diesel::prelude::*;
 use errors::*;
 use parking_lot::RwLock;
 use serde::Serialize;
@@ -63,7 +60,7 @@ config_keys! {
     VerificationAttemptLimit<u32>(10);
     VerificationCooldownSeconds<u64>(60 * 60 * 24);
 
-    TokenValiditySeconds<i32>(60 * 5);
+    TokenValiditySeconds<u32>(60 * 5);
 
     AllowReverification<bool>(true);
     ReverificationTimeoutSeconds<u64>(0);
@@ -103,34 +100,28 @@ impl ConfigManager {
     fn get_db(&self, conn: &DatabaseConnection, guild: Option<GuildId>,
               key: &str) -> Result<Option<String>> {
         Ok(match guild {
-            Some(guild) =>
-                 guild_config::table
-                    .filter(guild_config::discord_guild_id.eq(guild.0 as i64)
-                        .or(guild_config::key             .eq(key)))
-                    .select(guild_config::value)
-                    .get_result(conn.deref()).optional()?,
+            Some(guild) => {
+                conn.query_cached(
+                    "SELECT value FROM guild_config WHERE guild = ?1 AND key = ?2", (guild, key)
+                ).get_opt()?
+            }
             None =>
-                 global_config::table
-                    .filter(global_config::key.eq(key))
-                    .select(global_config::value)
-                    .get_result(conn.deref()).optional()?,
+                conn.query_cached(
+                    "SELECT value FROM global_config WHERE key = ?1", key
+                ).get_opt()?
         })
     }
     fn set_db(&self, conn: &DatabaseConnection, guild: Option<GuildId>,
               key: &str, value: &str) -> Result<()> {
         match guild {
             Some(guild) => {
-                diesel::replace_into(guild_config::table).values((
-                    guild_config::discord_guild_id.eq(guild.0 as i64),
-                    guild_config::key             .eq(key),
-                    guild_config::value           .eq(value),
-                )).execute(conn.deref())?;
+                conn.execute_cached(
+                    "REPLACE INTO guild_config (discord_guild_id, key, value) VALUES (?1, ?2, ?3)",
+                    (guild, key, value))?;
             }
             None => {
-                diesel::replace_into(global_config::table).values((
-                    global_config::key  .eq(key),
-                    global_config::value.eq(value),
-                )).execute(conn.deref())?;
+                conn.execute_cached(
+                    "REPLACE INTO global_config (key, value) VALUES (?1, ?2)", (key, value))?;
             }
         }
         Ok(())
@@ -139,16 +130,12 @@ impl ConfigManager {
                 key: &str) -> Result<()> {
         match guild {
             Some(guild) => {
-                diesel::delete(
-                    guild_config::table
-                        .filter(guild_config::discord_guild_id.eq(guild.0 as i64)
-                           .and(guild_config::key             .eq(key)))
-                ).execute(conn.deref())?;
+                conn.execute_cached(
+                    "DELETE FROM guild_config WHERE guild = ?1 AND key = ?2", (guild, key))?;
             }
             None => {
-                diesel::delete(
-                    global_config::table.filter(global_config::key.eq(key))
-                ).execute(conn.deref())?;
+                conn.execute_cached(
+                    "DELETE FROM global_config WHERE key = ?1", key)?;
             }
         }
         Ok(())

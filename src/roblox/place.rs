@@ -386,22 +386,27 @@ pub fn create_place_file(overwrite_template: Option<&[u8]>,
         trace!("Place property: {} {}.{} = {}", type_name, obj_name, prop_name, prop_value);
         Ok(match (type_name, obj_name, prop_name) {
             ("ModuleScript", "server_secure_config", "Source") => {
+                trace!("Injecting server configuration.");
                 server_secure_config_source = true;
                 Some(make_config(&config, true )?)
             }
             ("ModuleScript", "client_config", "Source") => {
+                trace!("Injecting client configuration.");
                 client_secure_config_source = true;
                 Some(make_config(&config, false)?)
             }
             ("ModuleScript", "server_secure_config", "ScriptGuid") => {
+                trace!("Changing server configuration UUID.");
                 server_secure_config_uuid = true;
                 Some(format!("{{{}}}", Uuid::new_v4()))
             }
             ("ModuleScript", "client_config", "ScriptGuid") => {
+                trace!("Changing client configuration UUID.");
                 client_secure_config_uuid = true;
                 Some(format!("{{{}}}", Uuid::new_v4()))
             }
             ("TextLabel", "TemplateMessage", "Text") => {
+                trace!("Removing template message.");
                 template_message = true;
                 Some("".to_owned())
             }
@@ -409,6 +414,7 @@ pub fn create_place_file(overwrite_template: Option<&[u8]>,
                 ensure!(prop_value == TEMPLATE_VERSION,
                         "wrong place template version: expected '{}', got '{}'",
                         TEMPLATE_VERSION, prop_value);
+                trace!("TemplateVersion OK");
                 version_found = true;
                 None
             }

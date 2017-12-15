@@ -9,9 +9,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-#[macro_use] mod database;
-
 mod config;
+mod database;
 mod discord;
 mod terminal;
 mod verifier;

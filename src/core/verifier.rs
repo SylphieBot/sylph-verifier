@@ -2,10 +2,6 @@ use chrono::{Utc, DateTime, NaiveDateTime, Duration};
 use constant_time_eq::constant_time_eq;
 use core::config::*;
 use core::database::*;
-use core::database::schema::*;
-use diesel;
-use diesel::dsl::count_star;
-use diesel::prelude::*;
 use errors::*;
 use hmac::{Hmac, Mac};
 use parking_lot::RwLock;
@@ -19,8 +15,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use util;
 
 const TOKEN_CHARS: &'static [u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const TOKEN_VERSION: i32 = 1;
-const HISTORY_COUNT: i64 = 5;
+const TOKEN_VERSION: u32 = 1;
+const HISTORY_COUNT: u32 = 5;
 
 #[derive(Clone, Hash, Debug, PartialOrd, Ord)]
 struct Token([u8; 6]);
@@ -69,35 +65,31 @@ impl Display for Token {
 pub enum RekeyReason {
     InitialKey, ManualRekey, OutdatedVersion, TimeIncrementChanged, Unknown(String),
 }
-impl CustomDBType for RekeyReason {
-    type Underlying_To = str;
-    fn to_underlying(&self) -> Cow<str> {
-        match self {
+impl ToSql for RekeyReason {
+    fn to_sql(&self) -> Result<ToSqlOutput> {
+        Ok(ValueRef::Text(match self {
             &RekeyReason::InitialKey           => "InitialKey",
             &RekeyReason::ManualRekey          => "ManualRekey",
             &RekeyReason::OutdatedVersion      => "OutdatedVersion",
             &RekeyReason::TimeIncrementChanged => "TimeIncrementChanged",
             &RekeyReason::Unknown(ref s)       => s,
-        }.into()
-    }
-
-    type Underlying_From = String;
-    fn from_underlying(reason: String) -> Self {
-        match reason.as_ref() {
-            "InitialKey"           => return RekeyReason::InitialKey,
-            "ManualRekey"          => return RekeyReason::ManualRekey,
-            "OutdatedVersion"      => return RekeyReason::OutdatedVersion,
-            "TimeIncrementChanged" => return RekeyReason::TimeIncrementChanged,
-            _                      => { }
-        }
-        RekeyReason::Unknown(reason)
+        }).into())
     }
 }
-custom_db_type!(RekeyReason, rekey_reason_mod, Text);
+impl FromSql for RekeyReason {
+    fn from_sql(value: ValueRef) -> Result<Self> {
+        match value {
+            ValueRef::Text("InitialKey"          ) => Ok(RekeyReason::InitialKey),
+            ValueRef::Text("ManualRekey"         ) => Ok(RekeyReason::ManualRekey),
+            ValueRef::Text("OutdatedVersion"     ) => Ok(RekeyReason::OutdatedVersion),
+            ValueRef::Text("TimeIncrementChanged") => Ok(RekeyReason::TimeIncrementChanged),
+            unk => bail!("Unknown SQLite value: {:?}", unk),
+        }
+    }
+}
 
-#[derive(Queryable)]
 struct TokenParameters {
-    id: i32, key: Vec<u8>, time_increment: i32, version: i32, change_reason: RekeyReason,
+    id: u64, key: Vec<u8>, time_increment: u32, version: u32, change_reason: RekeyReason,
 }
 impl TokenParameters {
     fn add_config<'a>(&self, config: &mut Vec<LuaConfigEntry<'a>>) {
@@ -144,10 +136,18 @@ impl TokenParameters {
         Ok(None)
     }
 }
+impl FromSqlRow for TokenParameters {
+    fn from_sql_row(row: Row) -> Result<Self> {
+        let (
+            id, key, time_increment, version, change_reason
+        ): (u64, Vec<u8>, u32, u32, RekeyReason) = FromSqlRow::from_sql_row(row)?;
+        Ok(TokenParameters { id, key, time_increment, version, change_reason })
+    }
+}
 
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub enum TokenStatus {
-    Verified { key_id: i32, epoch: i64 }, Outdated(RekeyReason), NotVerified,
+    Verified { key_id: u64, epoch: i64 }, Outdated(RekeyReason), NotVerified,
 }
 
 struct TokenContext {
@@ -155,9 +155,10 @@ struct TokenContext {
 }
 impl TokenContext {
     fn from_db_internal(conn: &DatabaseConnection) -> Result<Option<TokenContext>> {
-        let mut results = roblox_verification_keys::table
-            .order(roblox_verification_keys::id.desc()).limit(1 + HISTORY_COUNT)
-            .load::<TokenParameters>(conn.deref())?;
+        let mut results = conn.query_cached(
+            "SELECT * FROM roblox_verification_keys ORDER BY id DESC LIMIT ?1",
+            1 + HISTORY_COUNT,
+        ).get_all::<TokenParameters>()?;
         if results.len() == 0 {
             Ok(None)
         } else {
@@ -165,7 +166,7 @@ impl TokenContext {
             Ok(Some(TokenContext { current: results.pop().unwrap(), history }))
         }
     }
-    fn new_in_db(conn: &DatabaseConnection, time_increment: i32,
+    fn new_in_db(conn: &DatabaseConnection, time_increment: u32,
                  change_reason: RekeyReason) -> Result<TokenContext> {
         let mut rng = OsRng::new().chain_err(|| "OsRng creation failed")?;
         let mut key = Vec::new();
@@ -177,21 +178,19 @@ impl TokenContext {
             key.push((r >> 24) as u8);
         }
 
-        diesel::insert_into(roblox_verification_keys::table).values((
-            roblox_verification_keys::key           .eq(key),
-            roblox_verification_keys::time_increment.eq(time_increment),
-            roblox_verification_keys::version       .eq(TOKEN_VERSION),
-            roblox_verification_keys::change_reason .eq(change_reason),
-        )).execute(conn.deref())?;
+        conn.execute_cached(
+            "INSERT INTO roblox_verification_keys (key, time_increment, version, change_reason) \
+             VALUES (?1, ?2, ?3, ?4)", (key, time_increment, TOKEN_VERSION, change_reason)
+        )?;
         Ok(TokenContext::from_db_internal(conn)?.chain_err(|| "Could not get newly created key!")?)
     }
-    fn rekey(conn: &DatabaseConnection, time_increment: i32) -> Result<TokenContext> {
+    fn rekey(conn: &DatabaseConnection, time_increment: u32) -> Result<TokenContext> {
         info!("Regenerating token key due to user request.");
         conn.transaction_immediate(|| {
             TokenContext::new_in_db(conn, time_increment, RekeyReason::ManualRekey)
         })
     }
-    fn from_db(conn: &DatabaseConnection, time_increment: i32) -> Result<TokenContext> {
+    fn from_db(conn: &DatabaseConnection, time_increment: u32) -> Result<TokenContext> {
         conn.transaction_immediate(|| {
             match TokenContext::from_db_internal(conn)? {
                 Some(x) => {
@@ -232,19 +231,6 @@ impl TokenContext {
     }
 }
 
-impl CustomDBType for RobloxUserID {
-    type Underlying_To = i64;
-    fn to_underlying(&self) -> Cow<i64> {
-        Cow::Owned(self.0 as i64)
-    }
-
-    type Underlying_From = i64;
-    fn from_underlying(reason: i64) -> Self {
-        RobloxUserID(reason as u64)
-    }
-}
-custom_db_type!(RobloxUserID, roblox_user_id_mod, BigInt);
-
 pub struct Verifier {
     config: ConfigManager, database: Database, token_ctx: RwLock<TokenContext>,
 }
@@ -270,17 +256,15 @@ impl Verifier {
 
     pub fn get_verified_roblox_user(&self, user: UserId) -> Result<Option<RobloxUserID>> {
         let conn = self.database.connect()?;
-        Ok(discord_user_info::table
-            .filter(discord_user_info::discord_user_id.eq(user.0 as i64))
-            .select(discord_user_info::roblox_user_id)
-            .get_result(conn.deref()).optional()?.and_then(|x| x))
+        conn.query_cached(
+            "SELECT roblox_user_id FROM discord_user_info WHERE discord_user_id = ?1", user
+        ).get_opt()
     }
     pub fn get_verified_discord_user(&self, user: RobloxUserID) -> Result<Option<UserId>> {
         let conn = self.database.connect()?;
-        Ok(discord_user_info::table
-            .filter(discord_user_info::roblox_user_id.eq(user))
-            .select(discord_user_info::discord_user_id)
-            .get_result::<i64>(conn.deref()).optional()?.map(|x| UserId(x as u64)))
+        conn.query_cached(
+            "SELECT discord_user_info FROM roblox_user_id WHERE discord_user_info = ?1", user
+        ).get_opt()
     }
     pub fn try_verify(
         &self, discord_id: UserId, roblox_id: RobloxUserID, token: &str,
@@ -289,19 +273,16 @@ impl Verifier {
 
         // Check cooldown
         conn.transaction_immediate(|| {
-            let attempt_info = roblox_verification_cooldown::table
-                .filter(roblox_verification_cooldown::discord_user_id.eq(discord_id.0 as i64))
-                .select((roblox_verification_cooldown::attempt_count,
-                         roblox_verification_cooldown::last_attempt))
-                .get_result::<(i32, NaiveDateTime)>(conn.deref()).optional()?;
-            let mut new_attempt_count = 1;
-            if let Some((attempt_count, last_attempt)) = attempt_info {
+            let attempt_info = conn.query_cached(
+                "SELECT attempt_count, last_attempt FROM roblox_verification_cooldown \
+                 WHERE discord_user_id = ?1", discord_id
+            ).get_opt::<(u32, DateTime<Utc>)>()?;
+            let new_attempt_count = if let Some((attempt_count, last_attempt)) = attempt_info {
                 let max_attempts = self.config.get(None, ConfigKeys::VerificationAttemptLimit)?;
                 let cooldown = self.config.get(None, ConfigKeys::VerificationCooldownSeconds)?;
-                let cooldown_ends = DateTime::from_utc(last_attempt, Utc) +
-                                    Duration::seconds(cooldown as i64);
+                let cooldown_ends = last_attempt + Duration::seconds(cooldown as i64);
                 let now = Utc::now();
-                if attempt_count as u32 >= max_attempts && now < cooldown_ends {
+                if attempt_count >= max_attempts && now < cooldown_ends {
                     let time_left = cooldown_ends.signed_duration_since(now);
                     cmd_error!("You cannot make made more than {} verification attempts \
                                 within {}. Please try again in {}.",
@@ -309,12 +290,15 @@ impl Verifier {
                                util::to_english_time(cooldown),
                                util::to_english_time(time_left.num_seconds() as u64));
                 }
-                new_attempt_count = attempt_count + 1;
-            }
-            diesel::replace_into(roblox_verification_cooldown::table).values((
-                roblox_verification_cooldown::discord_user_id.eq(discord_id.0 as i64),
-                roblox_verification_cooldown::attempt_count  .eq(new_attempt_count),
-            )).execute(conn.deref())?;
+                attempt_count + 1
+            } else {
+                1
+            };
+            conn.execute_cached(
+                "REPLACE INTO roblox_verification_cooldown \
+                     (discord_user_id, last_attempt, attempt_count) \
+                 VALUES (?1, ?2, ?3)", (discord_id, Utc::now(), new_attempt_count)
+            )?;
             Ok(())
         })?;
 
@@ -323,10 +307,10 @@ impl Verifier {
             let token_ctx = self.token_ctx.read();
             match token_ctx.check_token(roblox_id, token)? {
                 TokenStatus::Verified { key_id, epoch } => {
-                    let last_key = roblox_user_info::table
-                        .filter(roblox_user_info::roblox_user_id.eq(roblox_id))
-                        .select((roblox_user_info::last_key_id, roblox_user_info::last_key_epoch))
-                        .get_result::<(i32, i64)>(conn.deref()).optional()?;
+                    let last_key = conn.query_cached(
+                        "SELECT last_key_id, last_key_epoch FROM roblox_user_info \
+                         WHERE roblox_user_id = ?1", roblox_id
+                    ).get_opt::<(u64, i64)>()?;
                     if let Some((last_id, last_epoch)) = last_key {
                         if last_id >= key_id && last_epoch >= epoch {
                             cmd_error!("An verfication attempt has already been made with the \
@@ -334,11 +318,11 @@ impl Verifier {
                                         to try again.")
                         }
                     }
-                    diesel::replace_into(roblox_user_info::table).values((
-                        roblox_user_info::roblox_user_id.eq(roblox_id),
-                        roblox_user_info::last_key_id   .eq(key_id),
-                        roblox_user_info::last_key_epoch.eq(epoch),
-                    )).execute(conn.deref())?;
+                    conn.execute_cached(
+                        "REPLACE INTO roblox_user_info \
+                             (roblox_user_id, last_key_id, last_key_epoch, last_updated) \
+                         VALUES (?1, ?2, ?3, ?4)", (roblox_id, key_id, epoch, Utc::now()),
+                    )?;
                 }
                 TokenStatus::Outdated(rekey_reason) => {
                     cmd_error!("The verification place has not been updated with the verification \
@@ -358,53 +342,51 @@ impl Verifier {
             let allow_reverification = self.config.get(None, ConfigKeys::AllowReverification)?;
 
             if !allow_reverification {
-                let verified_as = discord_user_info::table
-                    .filter(discord_user_info::discord_user_id.eq(discord_id.0 as i64))
-                    .select(discord_user_info::roblox_user_id)
-                    .get_result::<Option<RobloxUserID>>(conn.deref()).optional()?.and_then(|x| x);
+                let verified_as = conn.query_cached(
+                    "SELECT roblox_user_id FROM discord_user_info \
+                     WHERE discord_user_id = ?1", discord_id,
+                ).get_opt::<Option<RobloxUserID>>()?.and_then(|x| x);
                 if let Some(roblox_id) = verified_as {
                     cmd_error!("You are already verified as {}.",
                                roblox_id.lookup_username()?);
                 }
 
-                let roblox_count = discord_user_info::table
-                    .filter(discord_user_info::roblox_user_id.eq(roblox_id))
-                    .select(count_star()).get_result::<i64>(conn.deref())?;
+                let roblox_count = conn.query_cached(
+                    "SELECT COUNT(*) from discord_user_info \
+                     WHERE roblox_user_id = ?1", roblox_id,
+                ).get::<u64>()?;
                 if roblox_count != 0 {
                     cmd_error!("Someone else is already verified as {}.",
                                roblox_id.lookup_username()?);
                 }
             } else {
-                let last_verify = discord_user_info::table
-                    .filter(discord_user_info::discord_user_id.eq(discord_id.0 as i64))
-                    .select(discord_user_info::last_updated)
-                    .get_result::<NaiveDateTime>(conn.deref()).optional()?;
-                if let Some(last_updated) = last_verify {
+                let last_updated = conn.query_cached(
+                    "SELECT last_updated FROM discord_user_info \
+                     WHERE discord_user_id = ?1", discord_id
+                ).get_opt::<DateTime<Utc>>()?;
+                if let Some(last_updated) = last_updated {
                     let now = Utc::now();
-                    let reverify_timeout =
-                        self.config.get(None, ConfigKeys::ReverificationTimeoutSeconds)?;
-                    let cooldown_ends = DateTime::<Utc>::from_utc(last_updated, Utc) +
-                                        Duration::seconds(reverify_timeout as i64);
+                    let timeout = self.config.get(None, ConfigKeys::ReverificationTimeoutSeconds)?;
+                    let cooldown_ends = last_updated + Duration::seconds(timeout as i64);
                     if now < cooldown_ends {
                         let time_left = cooldown_ends.signed_duration_since(now);
                         cmd_error!("You cannot reverify more than once every {}. Please wait {} \
                                     before trying again.",
-                                   util::to_english_time(reverify_timeout),
+                                   util::to_english_time(timeout),
                                    util::to_english_time(time_left.num_seconds() as u64))
                     }
 
-                    diesel::update(discord_user_info::table
-                        .filter(discord_user_info::roblox_user_id.eq(roblox_id))
-                    ).set(
-                        discord_user_info::roblox_user_id.eq(None::<RobloxUserID>)
-                    ).execute(conn.deref())?;
+                    conn.execute_cached(
+                        "UPDATE discord_user_info SET roblox_user_id = NULL \
+                         WHERE roblox_user_id = ?1", roblox_id,
+                    )?;
                 }
             }
 
-            diesel::replace_into(discord_user_info::table).values((
-                discord_user_info::discord_user_id.eq(discord_id.0 as i64),
-                discord_user_info::roblox_user_id .eq(roblox_id)
-            )).execute(conn.deref())?;
+            conn.execute_cached(
+                "REPLACE INTO discord_user_info (discord_user_id, roblox_user_id, last_updated) \
+                 VALUES (?1, ?2, ?3)", (discord_id, roblox_id, Utc::now()),
+            )?;
 
             Ok(())
         })?;

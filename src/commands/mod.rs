@@ -336,7 +336,7 @@ impl <'a> CommandContext<'a> {
         match self.arg_opt_raw(i) {
             Some(t) => match t.parse::<T>() {
                 Ok(t) => Ok(Some(t)),
-                Err(_) => cmd_error!("Could not parse argument #{}", i + 1),
+                Err(_) => cmd_error!("Could not parse argument #{}: {}", i + 1, parse_err),
             },
             None => Ok(None),
         }
