@@ -36,6 +36,7 @@ extern crate uuid;
 
 mod commands;
 mod core;
+mod database;
 mod error_report;
 mod logger;
 mod roblox;

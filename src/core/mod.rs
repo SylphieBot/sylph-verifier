@@ -1,16 +1,15 @@
 use commands::*;
+use database::Database;
 use errors::*;
 use parking_lot::*;
 use roblox::*;
 use std::mem::drop;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 mod config;
-mod database;
 mod discord;
 mod terminal;
 mod verifier;
@@ -18,7 +17,6 @@ mod verifier;
 pub use self::config::{ConfigManager, ConfigKey, ConfigKeys};
 pub use self::verifier::{Verifier, TokenStatus, RekeyReason};
 
-use self::database::Database;
 use self::discord::DiscordManager;
 use self::terminal::Terminal;
 
@@ -72,8 +70,7 @@ impl CommandSender {
 #[derive(Clone)]
 pub struct VerifierCore(Arc<VerifierCoreData>);
 impl VerifierCore {
-    pub fn new<P: AsRef<Path>>(db_path: P) -> Result<VerifierCore> {
-        let database = Database::new(db_path.as_ref())?;
+    pub fn new(database: Database) -> Result<VerifierCore> {
         let config = ConfigManager::new(database.clone());
         let cmd_sender = CommandSender::new();
 

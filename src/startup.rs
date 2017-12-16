@@ -1,4 +1,5 @@
 use core::*;
+use database::Database;
 use error_report;
 use errors::*;
 use fs2::*;
@@ -88,7 +89,8 @@ pub fn start() {
         debug!("Root directory: {}", root_path.display());
         debug!("Database path: {}", db_path.display());
 
-        VerifierCore::new(db_path)?.start()?;
+        let database = Database::new(db_path)?;
+        VerifierCore::new(database)?.start()?;
         Ok(())
     }).ok();
 }

@@ -1,4 +1,4 @@
-use core::database::*;
+use database::*;
 use errors::*;
 use parking_lot::RwLock;
 use serde::Serialize;

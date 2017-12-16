@@ -1,7 +1,7 @@
 use chrono::{Utc, DateTime, NaiveDateTime, Duration};
 use constant_time_eq::constant_time_eq;
 use core::config::*;
-use core::database::*;
+use database::*;
 use errors::*;
 use hmac::{Hmac, Mac};
 use parking_lot::RwLock;
