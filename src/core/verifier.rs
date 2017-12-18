@@ -1,4 +1,4 @@
-use chrono::{Utc, DateTime, NaiveDateTime, Duration};
+use chrono::{Utc, DateTime, Duration};
 use constant_time_eq::constant_time_eq;
 use core::config::*;
 use database::*;
@@ -9,12 +9,11 @@ use rand::{Rng, OsRng};
 use roblox::*;
 use serenity::model::*;
 use sha2::Sha256;
-use std::borrow::Cow;
 use std::fmt::{Display, Formatter, Write, Result as FmtResult};
 use std::time::{SystemTime, UNIX_EPOCH};
 use util;
 
-const TOKEN_CHARS: &'static [u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const TOKEN_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const TOKEN_VERSION: u32 = 1;
 const HISTORY_COUNT: u32 = 5;
 
@@ -34,10 +33,10 @@ impl Token {
         let mut chars = [0u8; 6];
         for i in 0..6 {
             let byte = token[i];
-            if byte >= 'A' as u8 && byte <= 'Z' as u8 {
+            if byte >= b'A' && byte <= b'Z' {
                 chars[i] = byte
-            } else if byte >= 'a' as u8 && byte <= 'z' as u8 {
-                chars[i] = byte - 'a' as u8 + 'A' as u8
+            } else if byte >= b'a' && byte <= b'z' {
+                chars[i] = byte - b'a' + b'A'
             } else {
                 cmd_error!("Verification tokens may only contain letters. Please check your \
                             command and try again.")
@@ -63,16 +62,15 @@ impl Display for Token {
 
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub enum RekeyReason {
-    InitialKey, ManualRekey, OutdatedVersion, TimeIncrementChanged, Unknown(String),
+    InitialKey, ManualRekey, OutdatedVersion, TimeIncrementChanged,
 }
 impl ToSql for RekeyReason {
     fn to_sql(&self) -> Result<ToSqlOutput> {
-        Ok(ValueRef::Text(match self {
-            &RekeyReason::InitialKey           => "InitialKey",
-            &RekeyReason::ManualRekey          => "ManualRekey",
-            &RekeyReason::OutdatedVersion      => "OutdatedVersion",
-            &RekeyReason::TimeIncrementChanged => "TimeIncrementChanged",
-            &RekeyReason::Unknown(ref s)       => s,
+        Ok(ValueRef::Text(match *self {
+            RekeyReason::InitialKey           => "InitialKey",
+            RekeyReason::ManualRekey          => "ManualRekey",
+            RekeyReason::OutdatedVersion      => "OutdatedVersion",
+            RekeyReason::TimeIncrementChanged => "TimeIncrementChanged",
         }).into())
     }
 }
@@ -159,7 +157,7 @@ impl TokenContext {
             "SELECT * FROM roblox_verification_keys ORDER BY id DESC LIMIT ?1",
             1 + HISTORY_COUNT,
         ).get_all::<TokenParameters>()?;
-        if results.len() == 0 {
+        if results.is_empty() {
             Ok(None)
         } else {
             let history = results.split_off(1);
@@ -227,7 +225,7 @@ impl TokenContext {
                 return Ok(TokenStatus::Outdated(self.current.change_reason.clone()))
             }
         }
-        return Ok(TokenStatus::NotVerified)
+        Ok(TokenStatus::NotVerified)
     }
 }
 

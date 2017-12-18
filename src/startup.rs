@@ -9,8 +9,8 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::abort;
 
-const LOCK_FILE_NAME: &'static str = "Sylph-Verifier.lock";
-const DB_FILE_NAME: &'static str = "Sylph-Verifier.db";
+const LOCK_FILE_NAME: &str = "Sylph-Verifier.lock";
+const DB_FILE_NAME: &str = "Sylph-Verifier.db";
 
 fn check_lock<P: AsRef<Path>>(path: P) -> Result<File> {
     let mut options = OpenOptions::new();
@@ -90,7 +90,7 @@ pub fn start() {
         debug!("Database path: {}", db_path.display());
 
         let database = Database::new(db_path)?;
-        VerifierCore::new(database)?.start()?;
+        VerifierCore::new(root_path, database)?.start()?;
         Ok(())
     }).ok();
 }

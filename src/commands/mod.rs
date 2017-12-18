@@ -15,9 +15,9 @@ enum CommandFn {
 }
 impl CommandFn {
     fn call(&self, ctx: &CommandContext) -> Result<()> {
-        match self {
-            &CommandFn::Normal(f) => f(ctx),
-            &CommandFn::Discord(f) => match ctx.discord_context() {
+        match *self {
+            CommandFn::Normal(f) => f(ctx),
+            CommandFn::Discord(f) => match ctx.discord_context() {
                 Some((discord_ctx, message)) => f(ctx, discord_ctx, message),
                 None => cmd_error!("This command can only be used on Discord."),
             }
@@ -200,7 +200,7 @@ impl CommandList {
         }
         sorted_command_names.sort();
         let sorted_commands =
-            sorted_command_names.into_iter().map(|x| *commands.get(&x).unwrap()).collect();
+            sorted_command_names.into_iter().map(|x| commands[&x]).collect();
         CommandList { commands, sorted_commands }
     }
 
@@ -350,7 +350,7 @@ impl <'a> CommandContext<'a> {
 
     pub fn rest_opt(&self, i: usize) -> Option<&str> {
         if i < self.argc() {
-            Some(&self.args.str[self.args.matches[i].0..].trim())
+            Some(self.args.str[self.args.matches[i].0..].trim())
         } else if i == self.argc() {
             Some("")
         } else {

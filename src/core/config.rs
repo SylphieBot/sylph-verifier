@@ -56,6 +56,15 @@ config_keys! {
     CommandPrefix<String>("!".to_owned());
     DiscordToken<Option<String>>(None);
 
+    // Verification place settings
+    PlaceUITitle<String>("Roblox Account Verifier".to_owned());
+    PlaceUIInstructions<String>(
+        "To verify your Roblox account with this Discord server, please enter the following \
+         command on the server.".to_owned()
+    );
+    PlaceUIBackground<Option<String>>(None);
+    PlaceID<Option<u64>>(None);
+
     // Verification settings
     VerificationAttemptLimit<u32>(10);
     VerificationCooldownSeconds<u64>(60 * 60 * 24);
@@ -79,7 +88,7 @@ impl ConfigCache {
     }
 
     fn get<T>(&self, key: ConfigKey<T>) -> &ValueContainer {
-        self.0.get(&key.0.db_name).unwrap()
+        &self.0[&key.0.db_name]
     }
 }
 
@@ -191,7 +200,7 @@ impl ConfigManager {
         self.get_cache(guild, |cache| {
             let lock = cache.get(key);
 
-            if let &Some(ref any) = &*lock.read() {
+            if let Some(ref any) = *lock.read() {
                 return Ok(Any::downcast_ref::<T>(any.deref()).unwrap().clone())
             }
 

@@ -56,9 +56,8 @@ fn write_report_file<P: AsRef<Path>>(root_path: P, kind: &str, report: &str) -> 
 
 static ROOT_PATH: RwLock<Option<PathBuf>> = RwLock::new(None);
 fn write_report(kind: &str, cause: &str, backtrace: &str) -> Result<()> {
-    for line in cause.trim().split("\n") {
+    if let Some(line) = cause.trim().split('\n').next() {
         error!("{}", line);
-        break
     }
 
     let lc_kind = kind.to_lowercase();
@@ -98,7 +97,7 @@ fn check_report_deadlock() -> Result<bool> {
                     write!(threads_str, ", ")?;
                 }
                 is_first = false;
-                write!(threads_str, "{}", bt_ids.get(&thread.thread_id()).unwrap())?;
+                write!(threads_str, "{}", bt_ids[&thread.thread_id()])?;
             }
             writeln!(cause, "Deadlock involving {} threads: {}", deadlock.len(), threads_str)?;
         }
@@ -106,7 +105,7 @@ fn check_report_deadlock() -> Result<bool> {
         let mut backtrace = String::new();
         for key in bt_keys {
             writeln!(backtrace, "(thread #{})\n{:?}\n",
-                     bt_ids.get(&key).unwrap(), bt_map.get(&key).unwrap())?;
+                     bt_ids[&key], bt_map[&key])?;
         }
 
         logger::lock_log_sender();

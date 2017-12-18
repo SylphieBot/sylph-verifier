@@ -1,5 +1,5 @@
 use super::*;
 
-pub const COMMANDS: &'static [Command] = &[
+pub const COMMANDS: &[Command] = &[
 
 ];

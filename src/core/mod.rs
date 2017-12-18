@@ -1,9 +1,9 @@
 use commands::*;
 use database::Database;
 use errors::*;
-use parking_lot::*;
-use roblox::*;
+use parking_lot::{Mutex, RwLock};
 use std::mem::drop;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread;
@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 mod config;
 mod discord;
+mod place;
 mod terminal;
 mod verifier;
 
@@ -18,6 +19,7 @@ pub use self::config::{ConfigManager, ConfigKey, ConfigKeys};
 pub use self::verifier::{Verifier, TokenStatus, RekeyReason};
 
 use self::discord::DiscordManager;
+use self::place::PlaceManager;
 use self::terminal::Terminal;
 
 const STATUS_STOPPED : u8 = 0;
@@ -28,6 +30,7 @@ struct VerifierCoreData {
     status: AtomicU8,
     database: Database, config: ConfigManager, cmd_sender: CommandSender,
     terminal: Terminal, verifier: Verifier, discord: Mutex<DiscordManager>,
+    place: PlaceManager,
 }
 
 struct CommandSenderActiveGuard<'a>(&'a CommandSender);
@@ -67,20 +70,26 @@ impl CommandSender {
     }
 }
 
+const PLACE_TARGET_NAME: &str = "Sylph-Verifier.rbxl";
+
 #[derive(Clone)]
 pub struct VerifierCore(Arc<VerifierCoreData>);
 impl VerifierCore {
-    pub fn new(database: Database) -> Result<VerifierCore> {
+    pub fn new(root_path: PathBuf, database: Database) -> Result<VerifierCore> {
+        let mut place_target = root_path.clone();
+        place_target.push(PLACE_TARGET_NAME);
+
         let config = ConfigManager::new(database.clone());
         let cmd_sender = CommandSender::new();
 
         let terminal = Terminal::new(cmd_sender.clone())?;
         let verifier = Verifier::new(config.clone(), database.clone())?;
         let discord = Mutex::new(DiscordManager::new(config.clone(), cmd_sender.clone()));
+        let place = PlaceManager::new(place_target)?;
 
         Ok(VerifierCore(Arc::new(VerifierCoreData {
             status: AtomicU8::new(STATUS_STOPPED),
-            database, config, cmd_sender, terminal, verifier, discord,
+            database, config, cmd_sender, terminal, verifier, discord, place,
         })))
     }
     fn wait_on_instances(&self) {
@@ -106,6 +115,7 @@ impl VerifierCore {
                                                Ordering::Relaxed) == STATUS_STOPPED,
                 "VerifierCore already started.");
         let cmd_guard = self.0.cmd_sender.activate(&self.0);
+        self.refresh_place()?;
         self.connect_discord()?;
         self.0.terminal.open()?;
         ensure!(self.0.status.load(Ordering::Relaxed) == STATUS_STOPPING,
@@ -147,21 +157,11 @@ impl VerifierCore {
         self.0.discord.lock().reconnect()
     }
 
-    pub fn place_config(&self) -> Result<Vec<LuaConfigEntry>> {
-        let mut config = Vec::new();
-        // TODO: Make these dynamic from configuration.
-        config.push(LuaConfigEntry::new("title", false, "Roblox Account Verifier"));
-        config.push(LuaConfigEntry::new("intro_text", false, "\
-            To verify your Roblox account on <Discord Server Name>, please enter the following \
-            command in the #<channel name> channel.\
-        "));
-        config.push(LuaConfigEntry::new("bot_prefix", false,
-                                        self.config().get(None, ConfigKeys::CommandPrefix)?));
-        config.push(LuaConfigEntry::new("background_image", false, None as Option<&str>));
-        self.0.verifier.add_config(&mut config);
-        Ok(config)
+    pub fn refresh_place(&self) -> Result<()> {
+        self.0.place.update_place(self)
     }
 }
 
-// This allows start() to safely take &self rather than self.
+// This allows start() to safely take &self rather than self. This enforces a logical constraint,
+// not a memory safety constraint.
 impl !Sync for VerifierCore { }

@@ -44,7 +44,7 @@ fn logs(filter: LogLevelFilter, level: LogLevel) -> bool {
     }
 }
 
-const MODULE_PATH_INIT: &'static str = "sylph_verifier::";
+const MODULE_PATH_INIT: &str = "sylph_verifier::";
 fn munge_target(target: &str) -> &str {
     if target.starts_with(MODULE_PATH_INIT) {
         &target[MODULE_PATH_INIT.len()..]
@@ -72,10 +72,10 @@ pub fn remove_log_sender() {
 }
 
 #[cfg(windows)]
-const NEW_LINE: &'static str = "\r\n"; // Because Notepad exists.
+const NEW_LINE: &str = "\r\n"; // Because Notepad exists.
 
 #[cfg(not(windows))]
-const NEW_LINE: &'static str = "\n";
+const NEW_LINE: &str = "\n";
 
 enum LogFileOutput {
     NotInitialized,
@@ -97,9 +97,9 @@ impl LogFileOutput {
         Ok(())
     }
     fn check_open_new(&mut self, log_dir: &PathBuf) -> Result<()> {
-        let needs_refresh = match self {
-            &mut LogFileOutput::NotInitialized => true,
-            &mut LogFileOutput::Initialized { ref date, .. } => date != &Local::today(),
+        let needs_refresh = match *self {
+            LogFileOutput::NotInitialized => true,
+            LogFileOutput::Initialized { ref date, .. } => date != &Local::today(),
         };
         if needs_refresh {
             self.refresh(log_dir)?
@@ -124,7 +124,7 @@ struct Logger {
 }
 fn log_raw(line: &str) {
     match LOG_SENDER.lock().as_ref() {
-        Some(sender) => if let Err(_) = writeln!(sender, "{}", line) {
+        Some(sender) => if writeln!(sender, "{}", line).is_err() {
             println!("{}", line);
         }
         None => println!("{}", line),
@@ -141,7 +141,7 @@ impl Log for Logger {
     fn log(&self, record: &LogRecord) {
         let info = source_info(record.target());
         let level = record.level();
-        let log_console = logs(info.console, level);
+        let log_console = logs(info.console, level) && record.target() != "$command_input";
         let log_file = logs(info.log, level);
 
         if log_console || log_file {
@@ -155,11 +155,11 @@ impl Log for Logger {
                         now, munge_target(record.target()), record.level(), record.args())
             };
 
-            if log_console && record.target() != "$command_input" {
+            if log_console {
                 log_raw(&line);
             }
             if log_file {
-                if let Err(_) = LOG_FILE.lock().log(&self.log_dir, &line) {
+                if LOG_FILE.lock().log(&self.log_dir, &line).is_err() {
                     log_raw(&format!("[{}] [{}/WARN] Failed to log line to disk!",
                                      now, munge_target(module_path!())))
                 }

@@ -2,8 +2,15 @@ use super::*;
 
 use std::process::exit;
 
-const LOG_LEVEL_FILTER_ERROR: &'static str =
+const LOG_LEVEL_FILTER_ERROR: &str =
     "Could not parse log level. [valid levels: trace, debug, info, warn, error, off]";
+
+fn parse_as<R : FromStr>(s: &str, err: &str) -> Result<R> {
+    match s.parse() {
+        Ok(r) => Ok(r),
+        Err(_) => cmd_error!("{}", err),
+    }
+}
 
 struct ConfigOption {
     name: &'static str, help: &'static str, allow_guild: bool,
@@ -44,12 +51,42 @@ macro_rules! config_values {
     }
 }
 config_values! {
-    prefix<String>(CommandPrefix, false, "The prefix used before commands.",
-                   |x| Ok(x.to_owned()), |x| Ok(x), |_| Ok(()));
-    token<Option<String>>(DiscordToken, false, "The bot token used to connect to Discord.",
-                          |x| Ok(Some(x.to_owned())),
-                          |x| Ok(x.map_or("(not set)", |_| "<token redacted>").to_owned()),
-                          |_| Ok(()));
+    prefix<String>(
+        CommandPrefix, false, "The prefix used before commands.",
+        |x| Ok(x.to_owned()),
+        |x| Ok(format!("\"{}\"", x)),
+        |_| Ok(()));
+    discord_token<Option<String>>(
+        DiscordToken, false, "The bot token used to connect to Discord.",
+        |x| Ok(Some(x.to_owned())),
+        |x| Ok(x.map_or("(not set)", |_| "<token redacted>").to_owned()),
+        |_| Ok(()));
+
+    token_validity<u32>(
+        TokenValiditySeconds, false, "How many seconds a verification token is valid for.",
+        |x| parse_as(x, "Setting must be a positive number."),
+        |x| Ok(format!("{}", x)),
+        |x| {
+            x.core.verifier().rekey(false)?;
+            x.core.refresh_place()?;
+            Ok(())
+        });
+
+    place_ui_title<String>(
+        PlaceUITitle, false, "The title of the place UI.",
+        |x| Ok(x.to_owned()),
+        |x| Ok(format!("\"{}\"", x)),
+        |x| x.core.refresh_place());
+    place_ui_instructions<String>(
+        PlaceUIInstructions, false, "The instructions shown in the place UI.",
+        |x| Ok(x.to_owned()),
+        |x| Ok(format!("\"{}\"", x)),
+        |x| x.core.refresh_place());
+    place_ui_background<Option<String>>(
+        PlaceUIBackground, false, "The Asset ID shown in the background of the place UI.",
+        |x| Ok(Some(x.to_owned())),
+        |x| Ok(x.unwrap_or_else(|| "(default)".to_owned())),
+        |x| x.core.refresh_place());
 }
 lazy_static! {
     static ref CONFIG_OPTIONS: HashMap<&'static str, &'static ConfigOption> = {
@@ -85,8 +122,8 @@ fn set_config(ctx: &CommandContext, guild: Option<GuildId>) -> Result<()> {
         writeln!(config, "Current configuration options:")?;
         for &option in SORTED_OPTIONS.iter() {
             if guild.is_none() || option.allow_guild {
-                writeln!(config, "• {} = {} ({})",
-                         option.name, (option.get_config)(ctx, guild)?, option.help)?;
+                writeln!(config, "• {} = {}", option.name, (option.get_config)(ctx, guild)?)?;
+                writeln!(config, "  {}", option.help)?;
             }
         }
         ctx.respond(&config)
@@ -99,7 +136,7 @@ fn set_config(ctx: &CommandContext, guild: Option<GuildId>) -> Result<()> {
 
                 let rest = ctx.rest(1)?;
                 (option.set_config)(
-                    ctx, guild, if rest.is_empty() { None } else { Some(&rest) }
+                    ctx, guild, if rest.is_empty() { None } else { Some(rest) }
                 )
             }
             None => cmd_error!("No such configuration option '{}'.", config),
@@ -107,7 +144,7 @@ fn set_config(ctx: &CommandContext, guild: Option<GuildId>) -> Result<()> {
     }
 }
 
-pub const COMMANDS: &'static [Command] = &[
+pub const COMMANDS: &[Command] = &[
     Command::new("shutdown")
         .help(Some("[--force]"), "Shuts down the bot.")
         .no_threading()
@@ -129,6 +166,14 @@ pub const COMMANDS: &'static [Command] = &[
         .help(Some("<key> [new value]"), "Sets a global configuration value.")
         .terminal_only()
         .exec(|ctx| set_config(ctx, None)),
+    Command::new("rekey")
+        .help(None, "Changes the shared key used by the verifier.")
+        .terminal_only()
+        .exec(|ctx| {
+            ctx.core.verifier().rekey(true)?;
+            ctx.core.refresh_place()?;
+            Ok(())
+        }),
 
     // Discord management
     Command::new("connect")

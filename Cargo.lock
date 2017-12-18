@@ -1154,7 +1154,7 @@ dependencies = [
 [[package]]
 name = "serenity"
 version = "0.5.0"
-source = "git+https://github.com/zeyla/serenity.git?branch=v0.5.0#6eafc80b01d8b4d43b376acc6faa45f60dddd075"
+source = "git+https://github.com/zeyla/serenity.git?branch=v0.5.0#99d17d2975143b0d588c969f7ae6f8d11e62a9e1"
 dependencies = [
  "base64 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitflags 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1493,6 +1493,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "rand 0.3.18 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha1 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

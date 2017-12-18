@@ -9,7 +9,7 @@ use std::process::abort;
 // TODO: Review and possibly rewrite this module to deal with malicious role conditions.
 // TODO: Main risk is DoS via stack overflow.
 
-const DEFAULT_CONDITION_STRS: &'static [(&'static str, &'static str)] = &[
+const DEFAULT_CONDITION_STRS: &[(&str, &str)] = &[
     ("Verified", "true"),
     ("FormerBC", "builtin_role(NotBC) and badge(Welcome To The Club)"),
     ("NotBC", "not builtin_role(BC) and not builtin_role(TBC) and not builtin_role(OBC)"),
@@ -76,7 +76,7 @@ impl <'a> RuleAST<'a> {
         match self {
             // Constant propergation
             RuleAST::And(box RuleAST::Literal(a), box RuleAST::Literal(b)) =>
-                RuleAST::Literal(a || b),
+                RuleAST::Literal(a && b),
             RuleAST::Or(box RuleAST::Literal(a), box RuleAST::Literal(b)) =>
                 RuleAST::Literal(a || b),
             RuleAST::Not(box RuleAST::Literal(a)) =>
@@ -159,18 +159,18 @@ enum Comparison {
 }
 impl Comparison {
     fn satisifies(&self, val: u32) -> bool {
-        match self {
-            &Comparison::Equals(i) => val == i,
-            &Comparison::GreaterOrEqual(i) => val >= i,
-            &Comparison::LessOrEqual(i) => val <= i,
+        match *self {
+            Comparison::Equals(i) => val == i,
+            Comparison::GreaterOrEqual(i) => val >= i,
+            Comparison::LessOrEqual(i) => val <= i,
         }
     }
 }
 named!(parse_u32(&str) -> u32, map_res!(re_find_static!("^[0-9]+"), |x : &str| x.parse::<u32>()));
 named!(parse_condition(&str) -> Comparison, ws!(alt_complete!(
-    map!(ws!(terminated!(parse_u32, tag_s!("+"))), |t| Comparison::GreaterOrEqual(t)) |
-    map!(ws!(terminated!(parse_u32, tag_s!("+"))), |t| Comparison::LessOrEqual(t)) |
-    map!(parse_u32, |t| Comparison::Equals(t))
+    map!(ws!(terminated!(parse_u32, tag_s!("+"))), Comparison::GreaterOrEqual) |
+    map!(ws!(terminated!(parse_u32, tag_s!("+"))), Comparison::LessOrEqual) |
+    map!(parse_u32, Comparison::Equals)
 )));
 
 #[derive(Clone, Debug)]
@@ -206,22 +206,22 @@ impl <'a> CompileContext<'a> {
         if let Some(&id) = self.map.get(&expr) {
             Ok(id)
         } else {
-            let id = match expr {
-                &RuleAST::Literal(b) =>
+            let id = match *expr {
+                RuleAST::Literal(b) =>
                     self.push_op(RuleOp::Literal(b)),
-                &RuleAST::Not(box ref a) => {
+                RuleAST::Not(box ref a) => {
                     let op = RuleOp::Not(self.compile_expr(a, roles)?);
                     self.push_op(op)
                 },
-                &RuleAST::Or(box ref a, box ref b) => {
+                RuleAST::Or(box ref a, box ref b) => {
                     let op = RuleOp::Or(self.compile_expr(a, roles)?, self.compile_expr(b, roles)?);
                     self.push_op(op)
                 }
-                &RuleAST::And(box ref a, box ref b) => {
+                RuleAST::And(box ref a, box ref b) => {
                     let op = RuleOp::And(self.compile_expr(a, roles)?, self.compile_expr(b, roles)?);
                     self.push_op(op)
                 }
-                &RuleAST::Term("role", role) => {
+                RuleAST::Term("role", role) => {
                     ensure!(!self.processing_roles.contains(&role),
                             "loop while processing role: {}", role);
                     self.processing_roles.insert(role);
@@ -230,30 +230,30 @@ impl <'a> CompileContext<'a> {
                     self.processing_roles.remove(&role);
                     id
                 }
-                &RuleAST::Term("builtin_role", role) => {
+                RuleAST::Term("builtin_role", role) => {
                     let ast = DEFAULT_CONDITIONS.get(role)
                         .chain_err(|| format!("built-in role not found: {}", role))?;
                     self.compile_expr(&ast.0, roles)?
                 }
-                &RuleAST::Term("badge", badge) =>
+                RuleAST::Term("badge", badge) =>
                     self.push_op(RuleOp::CheckBadge(badge.to_owned())),
-                &RuleAST::Term("player_badge", badge) => {
+                RuleAST::Term("player_badge", badge) => {
                     let badge = badge.parse()
                         .chain_err(|| format!("badge id is not a number: {}", badge))?;
                     self.push_op(RuleOp::CheckPlayerBadge(badge))
                 }
-                &RuleAST::Term("owns_asset", asset) => {
+                RuleAST::Term("owns_asset", asset) => {
                     let asset = asset.parse()
                         .chain_err(|| format!("asset id is not a number: {}", asset))?;
                     self.push_op(RuleOp::CheckOwnsAsset(asset))
                 }
-                &RuleAST::Term("dev_trust_level", level) => {
+                RuleAST::Term("dev_trust_level", level) => {
                     let level = check_iresult(parse_condition(level))
                         .chain_err(|| format!("invalid trust level: {}", level))?;
                     self.push_op(RuleOp::CheckDevTrustLevel(level))
                 }
-                &RuleAST::Term("group", group_def) => {
-                    let split: Vec<&str> = group_def.split(",").collect();
+                RuleAST::Term("group", group_def) => {
+                    let split: Vec<&str> = group_def.split(',').collect();
                     let group = split[0].trim();
                     let group = group.parse()
                         .chain_err(|| format!("group id is not a number: {}", group))?;
@@ -268,7 +268,7 @@ impl <'a> CompileContext<'a> {
                         bail!("too many parameters in group({})", group_def)
                     }
                 }
-                &RuleAST::Term(func, data) =>
+                RuleAST::Term(func, data) =>
                     bail!("unknown term: {}({})", func, data),
             };
             self.map.insert(expr, id);
@@ -323,23 +323,23 @@ impl <'a> VerificationContext<'a> {
             Some(b) => Ok(b),
             None => {
                 let op = &self.ops[i];
-                let new = match op {
-                    &RuleOp::Literal(b) => b,
-                    &RuleOp::CheckBadge(ref name) => self.badges()?.contains(name),
-                    &RuleOp::CheckPlayerBadge(id) => api::has_player_badge(self.user_id, id)?,
-                    &RuleOp::CheckOwnsAsset(asset) => api::owns_asset(self.user_id, asset)?,
-                    &RuleOp::CheckInGroup(group, None) => self.groups()?.contains_key(&group),
-                    &RuleOp::CheckInGroup(group, Some(check)) => match self.groups()?.get(&group) {
+                let new = match *op {
+                    RuleOp::Literal(b) => b,
+                    RuleOp::CheckBadge(ref name) => self.badges()?.contains(name),
+                    RuleOp::CheckPlayerBadge(id) => api::has_player_badge(self.user_id, id)?,
+                    RuleOp::CheckOwnsAsset(asset) => api::owns_asset(self.user_id, asset)?,
+                    RuleOp::CheckInGroup(group, None) => self.groups()?.contains_key(&group),
+                    RuleOp::CheckInGroup(group, Some(check)) => match self.groups()?.get(&group) {
                         Some(&level) => check.satisifies(level),
                         None => false,
                     },
-                    &RuleOp::CheckDevTrustLevel(check) => match self.dev_trust_level()? {
+                    RuleOp::CheckDevTrustLevel(check) => match self.dev_trust_level()? {
                         Some(level) => check.satisifies(level),
                         None => false,
                     }
-                    &RuleOp::Not(a) => !self.eval(a)?,
-                    &RuleOp::Or(a, b) => self.eval(a)? || self.eval(b)?,
-                    &RuleOp::And(a, b) => self.eval(a)? && self.eval(b)?,
+                    RuleOp::Not(a) => !self.eval(a)?,
+                    RuleOp::Or(a, b) => self.eval(a)? || self.eval(b)?,
+                    RuleOp::And(a, b) => self.eval(a)? && self.eval(b)?,
                 };
                 self.cache[i] = Some(new);
                 Ok(new)

@@ -23,21 +23,21 @@ enum RblxCompressed<'a> {
 }
 impl <'a> RblxCompressed<'a> {
     fn decompress(&'a self) -> Result<Cow<'a, [u8]>> {
-        match self {
-            &RblxCompressed::Compressed { decompressed_len, data } => {
+        match *self {
+            RblxCompressed::Compressed { decompressed_len, data } => {
                 Ok(Cow::from(lz4::decompress(data, decompressed_len as usize)?))
             }
-            &RblxCompressed::Decompressed(ref vec) => {
+            RblxCompressed::Decompressed(ref vec) => {
                 Ok(Cow::from(vec.as_ref()))
             }
         }
     }
     fn compress(&'a self) -> Result<(u32, Cow<'a, [u8]>)> {
-        match self {
-            &RblxCompressed::Compressed { decompressed_len, data } => {
+        match *self {
+            RblxCompressed::Compressed { decompressed_len, data } => {
                 Ok((decompressed_len, Cow::from(data)))
             }
-            &RblxCompressed::Decompressed(ref vec) => {
+            RblxCompressed::Decompressed(ref vec) => {
                 Ok((vec.len() as u32, Cow::from(lz4::compress(vec.as_ref())?)))
             }
         }
@@ -61,7 +61,7 @@ fn read_cursor_slice<'a>(cursor: &mut Cursor<&'a [u8]>, len: usize) -> &'a [u8] 
     cursor.set_position(end as u64);
     slice
 }
-fn read_cursor_slice_to_end<'a>(cursor: Cursor<&'a [u8]>) -> &'a [u8] {
+fn read_cursor_slice_to_end(cursor: Cursor<&[u8]>) -> &[u8] {
     let start = cursor.position() as usize;
     &cursor.into_inner()[start..]
 }
@@ -74,8 +74,8 @@ fn parse_rblx_container(data: &[u8]) -> Result<RblxData> {
     let mut cursor = Cursor::new(data);
 
     let mut read_header = [0u8; 16];
-    cursor.read(&mut read_header)?;
-    ensure!(&read_header == RBLX_HEADER, "incorrect place file header");
+    cursor.read_exact(&mut read_header)?;
+    ensure!(read_header == RBLX_HEADER, "incorrect place file header");
 
     let type_count = cursor.read_u32::<LE>()?;
     let inst_count = cursor.read_u32::<LE>()?;
@@ -122,7 +122,7 @@ fn parse_types(rblx: &RblxData) -> Result<HashMap<u32, String>> {
 struct RblxStringProperties {
     type_id: u32, prop_name: String, prop_values: Vec<String>
 }
-fn parse_string_property<'a>(data: &'a[u8]) -> Result<Option<RblxStringProperties>> {
+fn parse_string_property(data: &[u8]) -> Result<Option<RblxStringProperties>> {
     let mut cursor = Cursor::new(data);
 
     let type_id = cursor.read_u32::<LE>()?;
@@ -150,12 +150,12 @@ fn parse_string_property<'a>(data: &'a[u8]) -> Result<Option<RblxStringPropertie
 fn write_string_property<W: Write>(w: &mut W, props: &RblxStringProperties) -> Result<()> {
     w.write_u32::<LE>(props.type_id)?;
     w.write_u32::<LE>(props.prop_name.len() as u32)?;
-    w.write(props.prop_name.as_bytes())?;
+    w.write_all(props.prop_name.as_bytes())?;
     w.write_u8(STRING_TYPE)?;
 
     for str in &props.prop_values {
         w.write_u32::<LE>(str.len() as u32)?;
-        w.write(str.as_bytes())?;
+        w.write_all(str.as_bytes())?;
     }
 
     Ok(())
@@ -190,9 +190,9 @@ fn map_string_properties<F>(rblx: &mut RblxData, mut f: F) -> Result<()>
         let mut modified = false;
         let type_data = type_names.get(&type_id)
             .chain_err(|| format!("unknown type id: {}", type_id))?;
-        if let &Some(ref names) = &type_data.1 {
+        if let Some(ref names) = type_data.1 {
             for (value, name) in prop_values.iter_mut().zip(names.iter()) {
-                if let Some(new_value) = f(&type_data.0, name, &prop_name, &value)? {
+                if let Some(new_value) = f(&type_data.0, name, &prop_name, value)? {
                     modified = true;
                     *value = new_value;
                 }
@@ -208,7 +208,7 @@ fn map_string_properties<F>(rblx: &mut RblxData, mut f: F) -> Result<()>
     Ok(())
 }
 fn write_rblx_container<W: Write>(w: &mut W, rblx: &RblxData) -> Result<()> {
-    w.write(RBLX_HEADER)?;
+    w.write_all(RBLX_HEADER)?;
 
     w.write_u32::<LE>(rblx.type_count)?;
     w.write_u32::<LE>(rblx.inst_count)?;
@@ -221,11 +221,11 @@ fn write_rblx_container<W: Write>(w: &mut W, rblx: &RblxData) -> Result<()> {
         w.write_u32::<LE>(data.len() as u32)?;
         w.write_u32::<LE>(uncompressed_size)?;
         w.write_u32::<LE>(0)?;
-        w.write(data.as_ref())?;
+        w.write_all(data.as_ref())?;
     }
 
     w.write_u32::<BE>(END0_HEADER)?;
-    w.write(RBLX_END)?;
+    w.write_all(RBLX_END)?;
 
     Ok(())
 }
@@ -236,8 +236,8 @@ pub enum LuaConfigValue<'a> {
 }
 impl <'a> Display for LuaConfigValue<'a> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match self {
-            &LuaConfigValue::Binary(ref b) => {
+        match *self {
+            LuaConfigValue::Binary(ref b) => {
                 write!(f, "\"")?;
                 for byte in b.iter() {
                     write!(f, "\\{}", byte)?;
@@ -245,9 +245,9 @@ impl <'a> Display for LuaConfigValue<'a> {
                 write!(f, "\"")?;
                 Ok(())
             }
-            &LuaConfigValue::String(ref s) => write!(f, "[[{}]]", s.replace("]", "]]..']'..[[")),
-            &LuaConfigValue::Double(val) => val.fmt(f),
-            &LuaConfigValue::Nil => f.write_str("nil"),
+            LuaConfigValue::String(ref s) => write!(f, "[[{}]]", s.replace("]", "]]..']'..[[")),
+            LuaConfigValue::Double(val) => val.fmt(f),
+            LuaConfigValue::Nil => f.write_str("nil"),
         }
     }
 }
@@ -338,7 +338,7 @@ impl <'a> LuaConfigEntry<'a> {
     }
 }
 
-fn make_config(config: &Vec<LuaConfigEntry>, is_server: bool) -> Result<String> {
+fn make_config(config: &[LuaConfigEntry], is_server: bool) -> Result<String> {
     let mut s = String::new();
 
     writeln!(s, "-- !!! DO NOT EDIT !!! --")?;
@@ -366,9 +366,14 @@ fn make_config(config: &Vec<LuaConfigEntry>, is_server: bool) -> Result<String> 
 }
 
 const PLACE_TEMPLATE: &[u8] = include_bytes!("place-template.rbxl");
-const TEMPLATE_VERSION: &'static str = "1";
+const TEMPLATE_VERSION: &str = "1";
+lazy_static! {
+    static ref CONFIG_UUID_NAMESPACE: Uuid =
+        "5314b09e-e38b-11e7-952b-5ef6654dc049".parse().unwrap();
+}
+
 pub fn create_place_file(overwrite_template: Option<&[u8]>,
-                         config: Vec<LuaConfigEntry>) -> Result<Vec<u8>> {
+                         config: &[LuaConfigEntry]) -> Result<Vec<u8>> {
     let place_file = overwrite_template.unwrap_or(PLACE_TEMPLATE);
     let mut place = parse_rblx_container(place_file)
         .chain_err(|| "Failed to parse Roblox place container.")?;
@@ -382,28 +387,29 @@ pub fn create_place_file(overwrite_template: Option<&[u8]>,
 
     let mut template_message = false;
 
+    let server_config = make_config(config, true )?;
+    let client_config = make_config(config, false)?;
     map_string_properties(&mut place, |type_name, obj_name, prop_name, prop_value| {
-        trace!("Place property: {} {}.{} = {}", type_name, obj_name, prop_name, prop_value);
         Ok(match (type_name, obj_name, prop_name) {
             ("ModuleScript", "server_secure_config", "Source") => {
                 trace!("Injecting server configuration.");
                 server_secure_config_source = true;
-                Some(make_config(&config, true )?)
+                Some(server_config.clone())
             }
             ("ModuleScript", "client_config", "Source") => {
                 trace!("Injecting client configuration.");
                 client_secure_config_source = true;
-                Some(make_config(&config, false)?)
+                Some(client_config.clone())
             }
             ("ModuleScript", "server_secure_config", "ScriptGuid") => {
                 trace!("Changing server configuration UUID.");
                 server_secure_config_uuid = true;
-                Some(format!("{{{}}}", Uuid::new_v4()))
+                Some(format!("{{{}}}", Uuid::new_v5(&CONFIG_UUID_NAMESPACE, &server_config)))
             }
             ("ModuleScript", "client_config", "ScriptGuid") => {
                 trace!("Changing client configuration UUID.");
                 client_secure_config_uuid = true;
-                Some(format!("{{{}}}", Uuid::new_v4()))
+                Some(format!("{{{}}}", Uuid::new_v5(&CONFIG_UUID_NAMESPACE, &client_config)))
             }
             ("TextLabel", "TemplateMessage", "Text") => {
                 trace!("Removing template message.");

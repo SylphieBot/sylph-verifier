@@ -4,6 +4,9 @@
            const_fn, const_atomic_bool_new, const_atomic_usize_new, conservative_impl_trait)]
 #![deny(unused_must_use)]
 
+// TODO: Temporary
+#![allow(unused_variables, dead_code)]
+
 extern crate backtrace;
 extern crate byteorder;
 extern crate chrono;

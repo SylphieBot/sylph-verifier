@@ -28,7 +28,7 @@ impl CommandContextData for TerminalContext {
         &self.line
     }
     fn respond(&self, message: &str, mention_user: bool) -> Result<()> {
-        for line in message.split("\n") {
+        for line in message.split('\n') {
             info!(target: "$raw", "[Command #{}] {}", self.command_no, line);
         }
         Ok(())
@@ -71,7 +71,7 @@ impl Terminal {
                         }
 
                         let command_no = COMMAND_ID.fetch_add(1, Ordering::Relaxed);
-                        if let Some(command) = get_command(&line) {
+                        if let Some(command) = get_command(line) {
                             let ctx = TerminalContext {
                                 line: line.to_owned(), command_no,
                             };

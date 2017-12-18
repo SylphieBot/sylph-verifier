@@ -32,7 +32,7 @@ impl <'a> CommandContextData for DiscordContext<'a> {
     }
     fn respond(&self, message: &str, mention_user: bool) -> Result<()> {
         self.message.channel_id.send_message(|m| if mention_user {
-            if message.contains("\n") {
+            if message.contains('\n') {
                 m.content(format_args!("<@{}>\n{}", self.message.author.id, message))
             } else {
                 m.content(format_args!("<@{}> {}", self.message.author.id, message))
@@ -82,16 +82,14 @@ impl EventHandler for Handler {
 
         let content = if message.content.starts_with(&prefix) {
             Some(&message.content[prefix.len()..])
-        } else {
-            if let Some(user_prefix) = self.user_prefix.read().as_ref() {
-                if message.content.starts_with(user_prefix) {
-                    Some(&message.content[user_prefix.len()..])
-                } else {
-                    None
-                }
+        } else if let Some(user_prefix) = self.user_prefix.read().as_ref() {
+            if message.content.starts_with(user_prefix) {
+                Some(&message.content[user_prefix.len()..])
             } else {
                 None
             }
+        } else {
+            None
         };
 
         if let Some(content) = content {
@@ -161,10 +159,9 @@ impl DiscordBot {
                 *data.shard_manager.lock() = Some(client.shard_manager.clone());
                 drop(data);
                 match client.start_autosharded() {
-                    Ok(_) | Err(SerenityError::Client(ClientError::Shutdown)) => { }
+                    Ok(_) | Err(SerenityError::Client(ClientError::Shutdown)) => Ok(()),
                     Err(err) => bail!(err),
                 }
-                Ok(())
             }).ok();
         })?;
         Ok(())
@@ -205,7 +202,7 @@ impl DiscordManager {
 
     fn connect_internal(&mut self) -> Result<()> {
         self.check_bot_dead();
-        if let &None = &self.bot {
+        if self.bot.is_none() {
             match self.config.get(None, ConfigKeys::DiscordToken)? {
                 Some(token) => {
                     let bot = DiscordBot::new(&token,
@@ -214,15 +211,15 @@ impl DiscordManager {
                     self.bot = Some(bot);
                 }
                 None => info!("No token configured for the Discord bot. Please use \
-                               \"set_global token YOUR_DISCORD_TOKEN_HERE\" to configure it, \
-                               then use \"connect\" to connect to Discord."),
+                               \"set_global discord_token YOUR_DISCORD_TOKEN_HERE\" to configure \
+                               it, then use \"connect\" to connect to Discord."),
             }
         }
         Ok(())
     }
     fn disconnect_internal(&mut self) -> Result<()> {
         self.check_bot_dead();
-        if let &Some(_) = &self.bot {
+        if self.bot.is_some() {
             self.bot.take().unwrap().shutdown()?;
         }
         Ok(())

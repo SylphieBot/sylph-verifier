@@ -22,7 +22,7 @@ struct FromSqlWrapper<T>(T);
 impl <T : FromSql> RusqliteFromSql for FromSqlWrapper<T> {
     fn column_result(value: ValueRef) -> FromSqlResult<Self> {
         T::from_sql(value)
-            .map(|x| FromSqlWrapper(x))
+            .map(FromSqlWrapper)
             .map_err(|x| FromSqlError::Other(box x.to_sync_error()))
     }
 }
@@ -260,7 +260,7 @@ impl DatabaseConnection {
 }
 
 struct Migration {
-    id: i64, name: &'static str, source: &'static str
+    id: u32, name: &'static str, source: &'static str
 }
 macro_rules! migration {
     ($id:expr, $file:expr) => {
@@ -293,21 +293,17 @@ impl Database {
     fn init_db(&self) -> Result<()> {
         let conn = self.connect()?;
 
-        let table_count = conn
-            .query("SELECT COUNT(*) FROM sqlite_master \
-                    WHERE type='table' AND name='sylph_verifier_migrations'", ())
-            .get::<u64>()?;
-        if table_count != 1 {
-            debug!("Creating migrations tracking table.");
-            conn.execute(
-                "CREATE TABLE sylph_verifier_migrations (id BIGINT PRIMARY KEY) WITHOUT ROWID;", ()
-            )?;
+        let created_count = conn.execute(
+            "CREATE TABLE IF NOT EXISTS sylph_verifier_migrations (id INTEGER PRIMARY KEY);", ()
+        )?;
+        if created_count != 0 {
+            debug!("Created migrations tracking table.");
         }
 
         let mut migrations_to_run = Vec::new();
         for migration in MIGRATIONS {
             let count = conn.query_cached("SELECT COUNT(*) FROM sylph_verifier_migrations \
-                                           WHERE id=?1", migration.id).get::<i32>()?;
+                                           WHERE id=?1", migration.id).get::<u32>()?;
             if count != 1 {
                 migrations_to_run.push(migration);
             }
