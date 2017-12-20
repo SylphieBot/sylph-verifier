@@ -6,7 +6,7 @@ use error_report;
 use parking_lot::{Mutex, RwLock};
 use serenity::Client;
 use serenity::client::bridge::gateway::ShardManager;
-use serenity::model::*;
+use serenity::model::prelude::*;
 use serenity::prelude::*;
 use std::mem::drop;
 use std::sync::Arc;

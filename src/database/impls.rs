@@ -1,7 +1,7 @@
 use super::*;
 
-use chrono::*;
-use serenity::model::*;
+use serenity::model::prelude::*;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use roblox::*;
 
 impl <T : FromSql> FromSqlRow for T {
@@ -42,7 +42,7 @@ macro_rules! from_rusqlite {
 from_rusqlite! {
     i8, i16, i32, i64, isize,
     u8, u16, u32,
-    f64, bool, String, Vec<u8>, DateTime<Utc>, DateTime<Local>,
+    f64, bool, String, Vec<u8>,
 }
 impl <T: FromSql> FromSql for Option<T> {
     fn from_sql(value: ValueRef) -> Result<Self> {
@@ -77,6 +77,11 @@ impl FromSql for RobloxUserID {
         Ok(RobloxUserID(u64::from_sql(value)?))
     }
 }
+impl FromSql for SystemTime {
+    fn from_sql(value: ValueRef) -> Result<Self> {
+        Ok(UNIX_EPOCH + Duration::from_secs(u64::from_sql(value)?))
+    }
+}
 
 macro_rules! to_rusqlite {
     ($($ty:ty),* $(,)*) => {
@@ -92,7 +97,7 @@ macro_rules! to_rusqlite {
 to_rusqlite! {
     i8, i16, i32, i64, isize,
     u8, u16, u32,
-    f64, bool, String, str, Vec<u8>, [u8], DateTime<Utc>, DateTime<Local>,
+    f64, bool, String, str, Vec<u8>, [u8],
 }
 impl <T: ToSql> ToSql for Option<T> {
     fn to_sql(&self) -> Result<ToSqlOutput> {
@@ -130,6 +135,11 @@ impl ToSql for GuildId {
 impl ToSql for RobloxUserID {
     fn to_sql(&self) -> Result<ToSqlOutput> {
         self.0.to_sql()
+    }
+}
+impl ToSql for SystemTime {
+    fn to_sql(&self) -> Result<ToSqlOutput> {
+        Ok(Value::Integer(self.duration_since(UNIX_EPOCH)?.as_secs() as i64).into())
     }
 }
 

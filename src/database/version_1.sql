@@ -26,7 +26,7 @@ CREATE TABLE discord_active_roles (
 CREATE TABLE roblox_verification_keys (
   id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
   key BLOB NOT NULL, time_increment INT NOT NULL CHECK (time_increment > 0),
-  version INT NOT NULL, change_reason TEXT NOT NULL
+  version INT NOT NULL, change_reason TEXT NOT NULL, last_updated TIMESTAMP NOT NULL
 );
 
 -- Stores cooldown for verification.
@@ -51,9 +51,11 @@ CREATE TABLE discord_user_info (
 ) WITHOUT ROWID;
 
 -- Stores information about which Discord users are verified as which Roblox users on which Discord guilds.
-CREATE TABLE discord_active_verifications (
-  discord_user_id BIGINT, discord_guild_id BIGINT, roblox_user_id BIGINT NOT NULL,
-  PRIMARY KEY (discord_user_id, roblox_user_id),
+CREATE TABLE discord_assigned_roles (
+  discord_user_id BIGINT, discord_guild_id BIGINT,
+  roblox_user_id BIGINT NOT NULL, discord_role_id BIGINT NOT NULL,
+  is_active BOOL NOT NULL, assigned_at TIMESTAMP NOT NULL, unassigned_at TIMESTAMP,
   FOREIGN KEY (roblox_user_id) REFERENCES roblox_user_info (roblox_user_id),
   FOREIGN KEY (discord_user_id) REFERENCES discord_user_info (discord_user_id) ON DELETE CASCADE
-) WITHOUT ROWID;
+);
+CREATE INDEX discord_assigned_roles_idx ON discord_assigned_roles (discord_user_id, discord_guild_id, is_active);

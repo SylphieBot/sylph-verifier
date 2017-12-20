@@ -3,7 +3,7 @@ use enumset::EnumSet;
 use error_report;
 use errors::*;
 use regex::Regex;
-use serenity::model::*;
+use serenity::model::prelude::*;
 use serenity::prelude::*;
 use std::collections::HashMap;
 use std::fmt::Write;

@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 mod config;
 mod discord;
 mod place;
+mod roles;
 mod terminal;
 mod verifier;
 

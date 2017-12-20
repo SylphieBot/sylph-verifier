@@ -8,7 +8,7 @@ use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::thread::panicking;
-use std::time::Duration;
+use std::time;
 use std::sync::Arc;
 
 mod impls;
@@ -279,7 +279,7 @@ impl Database {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Database> {
         let pool = Arc::new(Pool::builder()
             .max_size(15)
-            .idle_timeout(Some(Duration::from_secs(60 * 5)))
+            .idle_timeout(Some(time::Duration::from_secs(60 * 5)))
             .build(ConnectionManager::new(path.as_ref())?)?);
         let database = Database { pool };
         database.init_db()?;

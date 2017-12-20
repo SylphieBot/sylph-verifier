@@ -1,4 +1,3 @@
-use chrono::{Utc, DateTime, Duration};
 use constant_time_eq::constant_time_eq;
 use core::config::*;
 use database::*;
@@ -7,10 +6,10 @@ use hmac::{Hmac, Mac};
 use parking_lot::RwLock;
 use rand::{Rng, OsRng};
 use roblox::*;
-use serenity::model::*;
+use serenity::model::prelude::*;
 use sha2::Sha256;
 use std::fmt::{Display, Formatter, Write, Result as FmtResult};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use util;
 
 const TOKEN_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -154,7 +153,9 @@ struct TokenContext {
 impl TokenContext {
     fn from_db_internal(conn: &DatabaseConnection) -> Result<Option<TokenContext>> {
         let mut results = conn.query_cached(
-            "SELECT * FROM roblox_verification_keys ORDER BY id DESC LIMIT ?1",
+            "SELECT id, key, time_increment, version, change_reason \
+                 FROM roblox_verification_keys \
+                 ORDER BY id DESC LIMIT ?1",
             1 + HISTORY_COUNT,
         ).get_all::<TokenParameters>()?;
         if results.is_empty() {
@@ -177,8 +178,10 @@ impl TokenContext {
         }
 
         conn.execute_cached(
-            "INSERT INTO roblox_verification_keys (key, time_increment, version, change_reason) \
-             VALUES (?1, ?2, ?3, ?4)", (key, time_increment, TOKEN_VERSION, change_reason)
+            "INSERT INTO roblox_verification_keys \
+                 (key, time_increment, version, change_reason, last_updated) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            (key, time_increment, TOKEN_VERSION, change_reason, SystemTime::now())
         )?;
         Ok(TokenContext::from_db_internal(conn)?.chain_err(|| "Could not get newly created key!")?)
     }
@@ -274,19 +277,19 @@ impl Verifier {
             let attempt_info = conn.query_cached(
                 "SELECT attempt_count, last_attempt FROM roblox_verification_cooldown \
                  WHERE discord_user_id = ?1", discord_id
-            ).get_opt::<(u32, DateTime<Utc>)>()?;
+            ).get_opt::<(u32, SystemTime)>()?;
             let new_attempt_count = if let Some((attempt_count, last_attempt)) = attempt_info {
                 let max_attempts = self.config.get(None, ConfigKeys::VerificationAttemptLimit)?;
                 let cooldown = self.config.get(None, ConfigKeys::VerificationCooldownSeconds)?;
-                let cooldown_ends = last_attempt + Duration::seconds(cooldown as i64);
-                let now = Utc::now();
+                let cooldown_ends = last_attempt + Duration::from_secs(cooldown);
+                let now = SystemTime::now();
                 if attempt_count >= max_attempts && now < cooldown_ends {
-                    let time_left = cooldown_ends.signed_duration_since(now);
+                    let time_left = cooldown_ends.duration_since(now)?;
                     cmd_error!("You cannot make made more than {} verification attempts \
                                 within {}. Please try again in {}.",
                                max_attempts,
                                util::to_english_time(cooldown),
-                               util::to_english_time(time_left.num_seconds() as u64));
+                               util::to_english_time(time_left.as_secs()));
                 }
                 attempt_count + 1
             } else {
@@ -295,7 +298,7 @@ impl Verifier {
             conn.execute_cached(
                 "REPLACE INTO roblox_verification_cooldown \
                      (discord_user_id, last_attempt, attempt_count) \
-                 VALUES (?1, ?2, ?3)", (discord_id, Utc::now(), new_attempt_count)
+                 VALUES (?1, ?2, ?3)", (discord_id, SystemTime::now(), new_attempt_count)
             )?;
             Ok(())
         })?;
@@ -319,7 +322,7 @@ impl Verifier {
                     conn.execute_cached(
                         "REPLACE INTO roblox_user_info \
                              (roblox_user_id, last_key_id, last_key_epoch, last_updated) \
-                         VALUES (?1, ?2, ?3, ?4)", (roblox_id, key_id, epoch, Utc::now()),
+                         VALUES (?1, ?2, ?3, ?4)", (roblox_id, key_id, epoch, SystemTime::now()),
                     )?;
                 }
                 TokenStatus::Outdated(rekey_reason) => {
@@ -361,17 +364,17 @@ impl Verifier {
                 let last_updated = conn.query_cached(
                     "SELECT last_updated FROM discord_user_info \
                      WHERE discord_user_id = ?1", discord_id
-                ).get_opt::<DateTime<Utc>>()?;
+                ).get_opt::<SystemTime>()?;
                 if let Some(last_updated) = last_updated {
-                    let now = Utc::now();
+                    let now = SystemTime::now();
                     let timeout = self.config.get(None, ConfigKeys::ReverificationTimeoutSeconds)?;
-                    let cooldown_ends = last_updated + Duration::seconds(timeout as i64);
+                    let cooldown_ends = last_updated + Duration::from_secs(timeout);
                     if now < cooldown_ends {
-                        let time_left = cooldown_ends.signed_duration_since(now);
+                        let time_left = cooldown_ends.duration_since(now)?;
                         cmd_error!("You cannot reverify more than once every {}. Please wait {} \
                                     before trying again.",
                                    util::to_english_time(timeout),
-                                   util::to_english_time(time_left.num_seconds() as u64))
+                                   util::to_english_time(time_left.as_secs()))
                     }
 
                     conn.execute_cached(
@@ -383,7 +386,7 @@ impl Verifier {
 
             conn.execute_cached(
                 "REPLACE INTO discord_user_info (discord_user_id, roblox_user_id, last_updated) \
-                 VALUES (?1, ?2, ?3)", (discord_id, roblox_id, Utc::now()),
+                 VALUES (?1, ?2, ?3)", (discord_id, roblox_id, SystemTime::now()),
             )?;
 
             Ok(())

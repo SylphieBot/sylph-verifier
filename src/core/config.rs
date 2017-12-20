@@ -4,7 +4,7 @@ use parking_lot::RwLock;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json;
-use serenity::model::GuildId;
+use serenity::model::prelude::GuildId;
 use std::any::Any;
 use std::collections::HashMap;
 use std::marker::PhantomData;

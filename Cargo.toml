@@ -31,7 +31,7 @@ nom = { version = "3.2", features = ["regexp", "regexp_macros", "verbose-errors"
 parking_lot = { version = "0.5", features = ["nightly", "deadlock_detection"] }
 percent-encoding = "1.0"
 r2d2 = "0.8"
-rand = "0.3"
+rand = "0.4"
 regex = "0.2"
 reqwest = "0.8"
 rusqlite = { version = "0.13", features = ["bundled", "chrono"] }
