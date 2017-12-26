@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
+use util::ConcurrentCache;
 
 // TODO: Get rid of Clone here?
 // TODO: Prevent per-guild cache from growing indefinitely.
@@ -56,6 +57,13 @@ config_keys! {
     CommandPrefix<String>("!".to_owned());
     DiscordToken<Option<String>>(None);
 
+    // Limits for verification rules
+    RolesEnableLimits<bool>(false);
+    RolesMaxAssigned<u32>(15);
+    RolesMaxActiveCustomRules<u32>(15);
+    RolesMaxInstructions<u32>(500);
+    RolesMaxWebRequests<u32>(10);
+
     // Verification place settings
     PlaceUITitle<String>("Roblox Account Verifier".to_owned());
     PlaceUIInstructions<String>(
@@ -72,7 +80,7 @@ config_keys! {
     TokenValiditySeconds<u32>(60 * 5);
 
     AllowReverification<bool>(true);
-    ReverificationTimeoutSeconds<u64>(0);
+    ReverificationCooldownSeconds<u64>(0);
 }
 
 type ConfigValue = Option<Box<Any + Send + Sync + 'static>>;
@@ -94,7 +102,7 @@ impl ConfigCache {
 
 struct ConfigManagerData {
     database: Database,
-    global_cache: ConfigCache, guild_cache: RwLock<HashMap<GuildId, ConfigCache>>,
+    global_cache: ConfigCache, guild_cache: ConcurrentCache<GuildId, ConfigCache>,
 }
 
 #[derive(Clone)]
@@ -102,7 +110,7 @@ pub struct ConfigManager(Arc<ConfigManagerData>);
 impl ConfigManager {
     pub fn new(database: Database) -> ConfigManager {
         ConfigManager(Arc::new(ConfigManagerData {
-            database, global_cache: ConfigCache::new(), guild_cache: RwLock::new(HashMap::new()),
+            database, global_cache: ConfigCache::new(), guild_cache: ConcurrentCache::new(),
         }))
     }
 
@@ -152,20 +160,9 @@ impl ConfigManager {
 
     fn get_cache<T, F>(
         &self, guild: Option<GuildId>, f: F
-    ) -> T where F: FnOnce(&ConfigCache) -> T {
+    ) -> Result<T> where F: FnOnce(&ConfigCache) -> Result<T> {
         match guild {
-            Some(guild) => {
-                if self.0.guild_cache.read().get(&guild).is_some() {
-                    return f(self.0.guild_cache.read().get(&guild).unwrap())
-                }
-
-                // None case
-                let mut guild_cache = self.0.guild_cache.write();
-                if guild_cache.get(&guild).is_none() {
-                    guild_cache.insert(guild, ConfigCache::new());
-                }
-                f(guild_cache.get(&guild).unwrap())
-            }
+            Some(guild) => self.0.guild_cache.get_cached(&guild, || Ok(ConfigCache::new()), f),
             None => f(&self.0.global_cache),
         }
     }

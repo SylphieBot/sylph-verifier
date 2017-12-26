@@ -23,7 +23,7 @@ impl <T : FromSql> RusqliteFromSql for FromSqlWrapper<T> {
     fn column_result(value: ValueRef) -> FromSqlResult<Self> {
         T::from_sql(value)
             .map(FromSqlWrapper)
-            .map_err(|x| FromSqlError::Other(box x.to_sync_error()))
+            .map_err(|x| FromSqlError::Other(Box::new(x.to_sync_error())))
     }
 }
 pub trait FromSqlRow : Sized {
@@ -36,7 +36,8 @@ pub trait ToSql {
 struct ToSqlWrapper<'a, T: 'a>(&'a T);
 impl <'a, T : ToSql + 'a> RusqliteToSql for ToSqlWrapper<'a, T> {
     fn to_sql(&self) -> RusqliteResult<ToSqlOutput> {
-        self.0.to_sql().map_err(|x| RusqliteError::ToSqlConversionFailure(box x.to_sync_error()))
+        self.0.to_sql().map_err(|x|
+            RusqliteError::ToSqlConversionFailure(Box::new(x.to_sync_error())))
     }
 }
 pub trait ToSqlArgs {
@@ -135,8 +136,7 @@ impl ManageConnection for ConnectionManager {
     fn connect(&self) -> Result<SqliteConnection> {
         let conn = Connection::open_with_flags(&self.db_file,
             OpenFlags::SQLITE_OPEN_READ_WRITE |
-            OpenFlags::SQLITE_OPEN_CREATE |
-            OpenFlags::SQLITE_OPEN_SHARED_CACHE)?;
+            OpenFlags::SQLITE_OPEN_CREATE)?;
         conn.set_prepared_statement_cache_capacity(64);
         conn.execute_batch(include_str!("setup_connection.sql"))?;
         Ok(SqliteConnection { conn, is_poisoned: Cell::new(false) })
@@ -189,29 +189,29 @@ impl DatabaseConnection {
                 TransactionBehavior::Immediate => "BEGIN IMMEDIATE",
                 TransactionBehavior::Exclusive => "BEGIN EXCLUSIVE",
             };
-            self.execute_cached(sql, ()).unwrap();
+            self.execute_cached(sql, ())?;
             let _depth = TransactionDepthGuard::increment(self);
             match f() {
                 Ok(value) => {
-                    self.execute_cached("COMMIT", ()).unwrap();
+                    self.execute_cached("COMMIT", ())?;
                     Ok(value)
                 }
                 Err(e) => {
-                    self.execute_cached("ROLLBACK", ()).unwrap();
+                    self.execute_cached("ROLLBACK", ())?;
                     Err(e)
                 }
             }
         } else if let TransactionBehavior::Deferred = behavior {
             let name = format!("sylph_save_{}", self.transaction_depth.get());
-            self.execute(&format!("SAVEPOINT {}", name), ()).unwrap();
+            self.execute(&format!("SAVEPOINT {}", name), ())?;
             let _depth = TransactionDepthGuard::increment(self);
             match f() {
                 Ok(value) => {
-                    self.execute(&format!("RELEASE {}", name), ()).unwrap();
+                    self.execute(&format!("RELEASE {}", name), ())?;
                     Ok(value)
                 }
                 Err(e) => {
-                    self.execute(&format!("ROLLBACK TO {}", name), ()).unwrap();
+                    self.execute(&format!("ROLLBACK TO {}", name), ())?;
                     Err(e)
                 }
             }
@@ -300,18 +300,13 @@ impl Database {
             debug!("Created migrations tracking table.");
         }
 
-        let mut migrations_to_run = Vec::new();
-        for migration in MIGRATIONS {
-            let count = conn.query_cached("SELECT COUNT(*) FROM sylph_verifier_migrations \
-                                           WHERE id=?1", migration.id).get::<u32>()?;
-            if count != 1 {
-                migrations_to_run.push(migration);
-            }
-        }
+        let migrations_ran = conn.query(
+            "SELECT id FROM sylph_verifier_migrations", ()
+        ).get_all::<u32>()?;
 
-        if !migrations_to_run.is_empty() {
-            // TODO: Backup old database
-            for migration in migrations_to_run {
+        // TODO: Backup old database
+        for migration in MIGRATIONS {
+            if !migrations_ran.contains(&migration.id) {
                 debug!("Running migration '{}'", migration.name);
                 conn.transaction_exclusive(|| {
                     conn.execute("INSERT INTO sylph_verifier_migrations (id) VALUES (?1)",

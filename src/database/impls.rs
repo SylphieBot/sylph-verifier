@@ -72,6 +72,11 @@ impl FromSql for GuildId {
         Ok(GuildId(u64::from_sql(value)?))
     }
 }
+impl FromSql for RoleId {
+    fn from_sql(value: ValueRef) -> Result<Self> {
+        Ok(RoleId(u64::from_sql(value)?))
+    }
+}
 impl FromSql for RobloxUserID {
     fn from_sql(value: ValueRef) -> Result<Self> {
         Ok(RobloxUserID(u64::from_sql(value)?))
@@ -128,6 +133,11 @@ impl ToSql for UserId {
     }
 }
 impl ToSql for GuildId {
+    fn to_sql(&self) -> Result<ToSqlOutput> {
+        self.0.to_sql()
+    }
+}
+impl ToSql for RoleId {
     fn to_sql(&self) -> Result<ToSqlOutput> {
         self.0.to_sql()
     }

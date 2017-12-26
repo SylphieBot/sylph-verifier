@@ -13,11 +13,13 @@ mod config;
 mod discord;
 mod place;
 mod roles;
+mod statistics;
 mod terminal;
 mod verifier;
 
 pub use self::config::{ConfigManager, ConfigKey, ConfigKeys};
-pub use self::verifier::{Verifier, TokenStatus, RekeyReason};
+pub use self::roles::{RoleManager, AssignedRole};
+pub use self::verifier::{Verifier, VerifyResult, TokenStatus, RekeyReason};
 
 use self::discord::DiscordManager;
 use self::place::PlaceManager;
@@ -31,7 +33,7 @@ struct VerifierCoreData {
     status: AtomicU8,
     database: Database, config: ConfigManager, cmd_sender: CommandSender,
     terminal: Terminal, verifier: Verifier, discord: Mutex<DiscordManager>,
-    place: PlaceManager,
+    place: PlaceManager, roles: RoleManager,
 }
 
 struct CommandSenderActiveGuard<'a>(&'a CommandSender);
@@ -87,10 +89,11 @@ impl VerifierCore {
         let verifier = Verifier::new(config.clone(), database.clone())?;
         let discord = Mutex::new(DiscordManager::new(config.clone(), cmd_sender.clone()));
         let place = PlaceManager::new(place_target)?;
+        let roles = RoleManager::new(config.clone(), database.clone());
 
         Ok(VerifierCore(Arc::new(VerifierCoreData {
             status: AtomicU8::new(STATUS_STOPPED),
-            database, config, cmd_sender, terminal, verifier, discord, place,
+            database, config, cmd_sender, terminal, verifier, discord, place, roles,
         })))
     }
     fn wait_on_instances(&self) {
@@ -143,6 +146,9 @@ impl VerifierCore {
 
     pub fn config(&self) -> &ConfigManager {
         &self.0.config
+    }
+    pub fn roles(&self) -> &RoleManager {
+        &self.0.roles
     }
     pub fn verifier(&self) -> &Verifier {
         &self.0.verifier

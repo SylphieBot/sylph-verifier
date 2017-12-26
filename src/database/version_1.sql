@@ -7,21 +7,6 @@ CREATE TABLE guild_config (
   PRIMARY KEY (discord_guild_id, key)
 ) WITHOUT ROWID;
 
--- Stores custom verifier role definitions for Discord guilds.
-CREATE TABLE discord_custom_roles (
-  discord_guild_id BIGINT, role_name TEXT, condition TEXT NOT NULL,
-  last_updated TIMESTAMP NOT NULL,
-  PRIMARY KEY (discord_guild_id, role_name)
-) WITHOUT ROWID;
-
--- Stores verifier roles that are mapped to Discord roles.
-CREATE TABLE discord_active_roles (
-  discord_guild_id BIGINT, role_name TEXT,
-  discord_role_id BIGINT NOT NULL, discord_role_name TEXT NOT NULL,
-  last_updated TIMESTAMP NOT NULL,
-  PRIMARY KEY (discord_guild_id, role_name)
-) WITHOUT ROWID;
-
 -- Stores the keys used in the Roblox place file to verify users.
 CREATE TABLE roblox_verification_keys (
   id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -48,6 +33,21 @@ CREATE TABLE discord_user_info (
   discord_user_id BIGINT PRIMARY KEY, roblox_user_id BIGINT UNIQUE,
   last_updated TIMESTAMP NOT NULL,
   FOREIGN KEY (roblox_user_id) REFERENCES roblox_user_info (roblox_user_id)
+) WITHOUT ROWID;
+
+-- Stores custom verifier rule definitions for Discord guilds.
+CREATE TABLE discord_custom_rules (
+  discord_guild_id BIGINT, rule_name TEXT, condition TEXT NOT NULL,
+  last_updated TIMESTAMP NOT NULL,
+  PRIMARY KEY (discord_guild_id, rule_name)
+) WITHOUT ROWID;
+
+-- Stores verifier rules that are mapped to Discord roles.
+CREATE TABLE discord_active_rules (
+  discord_guild_id BIGINT, rule_name TEXT,
+  discord_role_id BIGINT NOT NULL, discord_role_name TEXT NOT NULL,
+  last_updated TIMESTAMP NOT NULL,
+  PRIMARY KEY (discord_guild_id, rule_name)
 ) WITHOUT ROWID;
 
 -- Stores information about which Discord users are verified as which Roblox users on which Discord guilds.

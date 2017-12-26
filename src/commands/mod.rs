@@ -32,7 +32,7 @@ pub enum PrivilegeLevel {
 
 enum_set_type! {
     pub enum CommandTarget {
-        Terminal, ServerMessage, PrivateMessage, Unknown,
+        Terminal, ServerMessage, PrivateMessage,
     }
 }
 
@@ -147,17 +147,19 @@ impl Command {
     pub(self) const fn exec(self, f: fn(&CommandContext) -> Result<()>) -> Command {
         Command { command_fn: Some(CommandFn::Normal(f)), ..self }
     }
-    pub(self) const fn exec_discord(self, f: fn(&CommandContext,
-                                          &Context, &Message) -> Result<()>) -> Command {
+    pub(self) const fn exec_discord(
+        self, f: fn(&CommandContext, &Context, &Message) -> Result<()>
+    ) -> Command {
         Command { command_fn: Some(CommandFn::Discord(f)), ..self }
     }
 
     pub fn run(&self, ctx: &CommandContextData, core: &VerifierCore) {
         let args = Args::new(ctx.message_content());
 
-        let ctx = CommandContext::new(core, ctx, args);
+        let ctx = CommandContext::new(core, ctx, args, self);
         ctx.catch_error(|| {
-            cmd_ensure!(ctx.privilege_level >= self.required_privilege,
+            cmd_ensure!(ctx.privilege_level >= self.required_privilege &&
+                        ctx.has_discord_permissions(self.discord_permissions),
                         "You do not have the necessary permissions to use that command.");
             if !self.allowed_contexts.contains(ctx.command_target) {
                 match ctx.command_target {
@@ -167,12 +169,8 @@ impl Command {
                         cmd_error!("This command cannot be used from Discord servers."),
                     CommandTarget::PrivateMessage =>
                         cmd_error!("This command cannot be used in DMs."),
-                    CommandTarget::Unknown =>
-                        cmd_error!("This command cannot be used here."),
                 };
             }
-            cmd_ensure!(ctx.has_discord_permissions(self.discord_permissions),
-                        "You do not have sufficient permissions to access this command.");
             self.command_fn.as_ref().unwrap().call(&ctx)
         }).ok();
     }
@@ -233,14 +231,15 @@ struct CommandContext<'a> {
     pub core: &'a VerifierCore,
     pub privilege_level: PrivilegeLevel,
     pub command_target: CommandTarget,
+    command: &'a Command,
     data: &'a CommandContextData,
     args: Args<'a>,
 }
 impl <'a> CommandContext<'a> {
     fn new(core: &'a VerifierCore, data: &'a CommandContextData,
-           args: Args<'a>) -> CommandContext<'a> {
+           args: Args<'a>, command: &'a Command) -> CommandContext<'a> {
         CommandContext {
-            core, data, args,
+            core, data, args, command,
             privilege_level: data.privilege_level(), command_target: data.command_target(),
         }
     }
@@ -263,25 +262,19 @@ impl <'a> CommandContext<'a> {
     }
 
     fn catch_error<F, T>(&self, f: F) -> Result<T> where F: FnOnce() -> Result<T> {
-        match error_report::catch_error(|| Ok(f())) {
-            Ok(Ok(x)) => Ok(x),
-            Ok(Err(Error(box (ErrorKind::CommandError(err), _)))) => {
+        error_report::catch_error(|| match f() {
+            Ok(x) => Ok(x),
+            Err(Error(box (ErrorKind::CommandError(err), _))) => {
                 self.respond(&err)?;
                 bail!(ErrorKind::CommandError(err))
             }
-            Err(e) | Ok(Err(e)) => {
-                self.respond("The command encountered an unknown error. \
+            Err(e) => {
+                self.respond("The command encountered an unexpected error. \
                               Please contact the bot owner.")?;
+                error!("Command encountered an unexpected error!");
                 Err(e)
             }
-        }
-    }
-
-    pub fn ensure_option<T, S: AsRef<str>>(&self, o: Option<T>, s: S) -> Result<T> {
-        match o {
-            Some(t) => Ok(t),
-            None => cmd_error!(s.as_ref()),
-        }
+        })
     }
 
     pub fn get_guild(&self) -> Result<Option<GuildId>> {
@@ -303,7 +296,7 @@ impl <'a> CommandContext<'a> {
                     Channel::Group(_) | Channel::Private(_) | Channel::Category(_) =>
                         Ok(Permissions::empty()),
                 },
-            None => bail!("This command can only be used on Discord guilds."),
+            None => bail!("This command can only be used on Discord."),
         }
     }
     pub fn has_discord_permissions(&self, perms: EnumSet<DiscordPermission>) -> bool {
@@ -315,16 +308,16 @@ impl <'a> CommandContext<'a> {
             self.user_guild_permissions().ok().map_or(false, |x| x.contains(perms))
     }
 
-    pub fn min_args(&self, min: usize) -> Result<()> {
-        cmd_ensure!(self.argc() >= min,
-                    "Not enough arguments for command. ({} required)", self.argc());
-        Ok(())
+    fn not_enough_arguments(&self) -> String {
+        format!("Not enough arguments for command. Usage: {}{}{}",
+                self.prefix(), self.command.name,
+                self.command.help_args.map_or("".to_owned(), |x| format!(" {}", x)))
     }
 
     pub fn argc(&self) -> usize {
         self.args.matches.len()
     }
-    pub fn arg_opt_raw(&self, i: usize) -> Option<&str> {
+    pub fn arg_opt(&self, i: usize) -> Option<&str> {
         if i < self.argc() {
             let arg = self.args.matches[i];
             Some(&self.args.str[arg.0..arg.1])
@@ -332,20 +325,8 @@ impl <'a> CommandContext<'a> {
             None
         }
     }
-    pub fn arg_opt<T: FromStr>(&self, i: usize, parse_err: &str) -> Result<Option<T>> {
-        match self.arg_opt_raw(i) {
-            Some(t) => match t.parse::<T>() {
-                Ok(t) => Ok(Some(t)),
-                Err(_) => cmd_error!("Could not parse argument #{}: {}", i + 1, parse_err),
-            },
-            None => Ok(None),
-        }
-    }
-    pub fn arg_raw(&self, i: usize) -> Result<&str> {
-        self.ensure_option(self.arg_opt_raw(i), "Not enough arguments for command.")
-    }
-    pub fn arg<T: FromStr>(&self, i: usize, parse_err: &str) -> Result<T> {
-       self.ensure_option(self.arg_opt(i, parse_err)?, "Not enough arguments for command.")
+    pub fn arg(&self, i: usize) -> Result<&str> {
+        self.arg_opt(i).to_cmd_err(|| self.not_enough_arguments())
     }
 
     pub fn rest_opt(&self, i: usize) -> Option<&str> {
@@ -358,7 +339,7 @@ impl <'a> CommandContext<'a> {
         }
     }
     pub fn rest(&self, i: usize) -> Result<&str> {
-        self.ensure_option(self.rest_opt(i), "Not enough arguments for command.")
+        self.rest_opt(i).to_cmd_err(|| self.not_enough_arguments())
     }
 }
 

@@ -1,6 +1,6 @@
 #![warn(unused_extern_crates)]
 #![recursion_limit="128"]
-#![feature(box_syntax, box_patterns, never_type, integer_atomics, optin_builtin_traits,
+#![feature(nll, box_patterns, never_type, integer_atomics, optin_builtin_traits,
            const_fn, const_atomic_bool_new, const_atomic_usize_new, conservative_impl_trait)]
 #![deny(unused_must_use)]
 
@@ -32,7 +32,6 @@ extern crate uuid;
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
-#[macro_use] extern crate nom;
 #[macro_use] extern crate serde_derive;
 
 #[macro_use] mod errors;

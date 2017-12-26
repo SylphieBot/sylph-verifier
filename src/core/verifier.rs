@@ -10,7 +10,6 @@ use serenity::model::prelude::*;
 use sha2::Sha256;
 use std::fmt::{Display, Formatter, Write, Result as FmtResult};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use util;
 
 const TOKEN_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const TOKEN_VERSION: u32 = 1;
@@ -232,6 +231,15 @@ impl TokenContext {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum VerifyResult {
+    VerificationOk, TokenAlreadyUsed, VerificationPlaceOutdated, InvalidToken,
+    TooManyAttempts { max_attempts: u32, cooldown: u64, cooldown_ends: SystemTime },
+    SenderVerifiedAs { other_roblox_id: RobloxUserID },
+    RobloxAccountVerifiedTo { other_discord_id: UserId },
+    ReverifyOnCooldown { cooldown: u64, cooldown_ends: SystemTime }
+}
+
 pub struct Verifier {
     config: ConfigManager, database: Database, token_ctx: RwLock<TokenContext>,
 }
@@ -267,29 +275,29 @@ impl Verifier {
             "SELECT discord_user_info FROM roblox_user_id WHERE discord_user_info = ?1", user
         ).get_opt()
     }
+
     pub fn try_verify(
         &self, discord_id: UserId, roblox_id: RobloxUserID, token: &str,
-    ) -> Result<()> {
+    ) -> Result<VerifyResult> {
         let conn = self.database.connect()?;
 
+        debug!("Starting verification attempt: discord id {} -> roblox id {}",
+               discord_id.0, roblox_id.0);
+
         // Check cooldown
-        conn.transaction_immediate(|| {
+        let max_attempts = self.config.get(None, ConfigKeys::VerificationAttemptLimit)?;
+        let verify_cooldown = self.config.get(None, ConfigKeys::VerificationCooldownSeconds)?;
+        let result = conn.transaction_immediate(|| {
             let attempt_info = conn.query_cached(
                 "SELECT attempt_count, last_attempt FROM roblox_verification_cooldown \
                  WHERE discord_user_id = ?1", discord_id
             ).get_opt::<(u32, SystemTime)>()?;
             let new_attempt_count = if let Some((attempt_count, last_attempt)) = attempt_info {
-                let max_attempts = self.config.get(None, ConfigKeys::VerificationAttemptLimit)?;
-                let cooldown = self.config.get(None, ConfigKeys::VerificationCooldownSeconds)?;
-                let cooldown_ends = last_attempt + Duration::from_secs(cooldown);
-                let now = SystemTime::now();
-                if attempt_count >= max_attempts && now < cooldown_ends {
-                    let time_left = cooldown_ends.duration_since(now)?;
-                    cmd_error!("You cannot make made more than {} verification attempts \
-                                within {}. Please try again in {}.",
-                               max_attempts,
-                               util::to_english_time(cooldown),
-                               util::to_english_time(time_left.as_secs()));
+                let cooldown_ends = last_attempt + Duration::from_secs(verify_cooldown);
+                if attempt_count >= max_attempts && SystemTime::now() < cooldown_ends {
+                    return Ok(VerifyResult::TooManyAttempts {
+                        max_attempts, cooldown: verify_cooldown, cooldown_ends
+                    })
                 }
                 attempt_count + 1
             } else {
@@ -300,11 +308,15 @@ impl Verifier {
                      (discord_user_id, last_attempt, attempt_count) \
                  VALUES (?1, ?2, ?3)", (discord_id, SystemTime::now(), new_attempt_count)
             )?;
-            Ok(())
+            Ok(VerifyResult::VerificationOk)
         })?;
+        match result {
+            VerifyResult::VerificationOk => { }
+            _ => return Ok(result),
+        }
 
         // Check token
-        conn.transaction_immediate(|| {
+        let result = conn.transaction_immediate(|| {
             let token_ctx = self.token_ctx.read();
             match token_ctx.check_token(roblox_id, token)? {
                 TokenStatus::Verified { key_id, epoch } => {
@@ -314,9 +326,7 @@ impl Verifier {
                     ).get_opt::<(u64, i64)>()?;
                     if let Some((last_id, last_epoch)) = last_key {
                         if last_id >= key_id && last_epoch >= epoch {
-                            cmd_error!("An verfication attempt has already been made with the \
-                                        token you used. Please wait for a new key to be generated \
-                                        to try again.")
+                            return Ok(VerifyResult::TokenAlreadyUsed)
                         }
                     }
                     conn.execute_cached(
@@ -325,56 +335,54 @@ impl Verifier {
                          VALUES (?1, ?2, ?3, ?4)", (roblox_id, key_id, epoch, SystemTime::now()),
                     )?;
                 }
-                TokenStatus::Outdated(rekey_reason) => {
-                    cmd_error!("The verification place has not been updated with the verification \
-                                bot, and verifications cannot be completed at this time moment. \
-                                Please ask the bot owner to fix this problem.")
-                }
-                TokenStatus::NotVerified => {
-                    cmd_error!("That token is not valid or has already expired. Please check your \
-                                command and try again.")
-                }
+                TokenStatus::Outdated(rekey_reason) =>
+                    return Ok(VerifyResult::VerificationPlaceOutdated),
+                TokenStatus::NotVerified =>
+                    return Ok(VerifyResult::InvalidToken),
             }
-            Ok(())
+            Ok(VerifyResult::VerificationOk)
         })?;
+        match result {
+            VerifyResult::VerificationOk => { }
+            _ => return Ok(result),
+        }
 
         // Attempt to verify user
+        let allow_reverification = self.config.get(None, ConfigKeys::AllowReverification)?;
+        let reverify_cooldown = self.config.get(None, ConfigKeys::ReverificationCooldownSeconds)?;
         conn.transaction_immediate(|| {
-            let allow_reverification = self.config.get(None, ConfigKeys::AllowReverification)?;
 
             if !allow_reverification {
                 let verified_as = conn.query_cached(
                     "SELECT roblox_user_id FROM discord_user_info \
                      WHERE discord_user_id = ?1", discord_id,
                 ).get_opt::<Option<RobloxUserID>>()?.and_then(|x| x);
-                if let Some(roblox_id) = verified_as {
-                    cmd_error!("You are already verified as {}.",
-                               roblox_id.lookup_username()?);
+                if let Some(other_roblox_id) = verified_as {
+                    return Ok(VerifyResult::SenderVerifiedAs { other_roblox_id })
                 }
 
-                let roblox_count = conn.query_cached(
-                    "SELECT COUNT(*) from discord_user_info \
+                let other_id = conn.query_cached(
+                    "SELECT discord_user_id from discord_user_info \
                      WHERE roblox_user_id = ?1", roblox_id,
-                ).get::<u64>()?;
-                if roblox_count != 0 {
-                    cmd_error!("Someone else is already verified as {}.",
-                               roblox_id.lookup_username()?);
+                ).get_opt::<UserId>()?;
+                if let Some(other_discord_id) = other_id {
+                    return Ok(VerifyResult::RobloxAccountVerifiedTo { other_discord_id })
                 }
             } else {
                 let last_updated = conn.query_cached(
-                    "SELECT last_updated FROM discord_user_info \
+                    "SELECT roblox_user_id, last_updated FROM discord_user_info \
                      WHERE discord_user_id = ?1", discord_id
-                ).get_opt::<SystemTime>()?;
-                if let Some(last_updated) = last_updated {
-                    let now = SystemTime::now();
-                    let timeout = self.config.get(None, ConfigKeys::ReverificationTimeoutSeconds)?;
-                    let cooldown_ends = last_updated + Duration::from_secs(timeout);
-                    if now < cooldown_ends {
-                        let time_left = cooldown_ends.duration_since(now)?;
-                        cmd_error!("You cannot reverify more than once every {}. Please wait {} \
-                                    before trying again.",
-                                   util::to_english_time(timeout),
-                                   util::to_english_time(time_left.as_secs()))
+                ).get_opt::<(Option<RobloxUserID>, SystemTime)>()?;
+                if let Some((current_id, last_updated)) = last_updated {
+                    if current_id == Some(roblox_id) {
+                        return Ok(VerifyResult::SenderVerifiedAs { other_roblox_id: roblox_id })
+                    }
+
+                    let cooldown_ends = last_updated + Duration::from_secs(reverify_cooldown);
+                    if SystemTime::now() < cooldown_ends {
+                        return Ok(VerifyResult::ReverifyOnCooldown {
+                            cooldown: reverify_cooldown, cooldown_ends
+                        })
                     }
 
                     conn.execute_cached(
@@ -389,10 +397,8 @@ impl Verifier {
                  VALUES (?1, ?2, ?3)", (discord_id, roblox_id, SystemTime::now()),
             )?;
 
-            Ok(())
-        })?;
-
-        Ok(())
+            Ok(VerifyResult::VerificationOk)
+        })
     }
 
     pub fn add_config<'a>(&self, config: &'a mut Vec<LuaConfigEntry>) {

@@ -25,9 +25,8 @@ hmac = "0.5"
 lazy_static = "1.0"
 libc = "0.2"
 linefeed = { version = "0.3", git = "https://github.com/Lymia/linefeed.git", branch = "concurrent-loggers" }
-log = "0.3"
+log = "0.4"
 lz4-sys = "1.8"
-nom = { version = "3.2", features = ["regexp", "regexp_macros", "verbose-errors"] }
 parking_lot = { version = "0.5", features = ["nightly", "deadlock_detection"] }
 percent-encoding = "1.0"
 r2d2 = "0.8"

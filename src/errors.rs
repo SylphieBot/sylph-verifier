@@ -9,6 +9,7 @@ mod internal {
         foreign_links {
             Fmt(std::fmt::Error);
             Io(std::io::Error);
+            ParseIntError(std::num::ParseIntError);
             R2D2(r2d2::Error);
             Reqwest(reqwest::Error);
             Rusqlite(rusqlite::Error);
@@ -73,4 +74,13 @@ macro_rules! cmd_ensure {
     ($cond:expr, $err:expr, $($arg:expr),* $(,)*) => {
         ensure!($cond, $crate::errors::ErrorKind::CommandError(format!($err, $($arg,)*)))
     };
+}
+
+pub trait ResultCmdExt<T> {
+    fn to_cmd_err<F, R: Into<String>>(self, f: F) -> Result<T> where F: FnOnce() -> R;
+}
+impl <T, E: ResultExt<T>> ResultCmdExt<T> for E {
+    fn to_cmd_err<F, R: Into<String>>(self, f: F) -> Result<T> where F: FnOnce() -> R {
+        self.chain_err(|| ErrorKind::CommandError(f().into()))
+    }
 }

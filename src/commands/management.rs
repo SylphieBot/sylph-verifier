@@ -128,7 +128,7 @@ fn set_config(ctx: &CommandContext, guild: Option<GuildId>) -> Result<()> {
         }
         ctx.respond(&config)
     } else {
-        let config = ctx.arg_raw(0)?;
+        let config = ctx.arg(0)?;
         match CONFIG_OPTIONS.get(config) {
             Some(option) => {
                 cmd_ensure!(guild.is_none() || option.allow_guild,
@@ -150,7 +150,7 @@ pub const COMMANDS: &[Command] = &[
         .no_threading()
         .terminal_only()
         .exec(|ctx| {
-            match ctx.arg_opt_raw(0) {
+            match ctx.arg_opt(0) {
                 Some("--force") => { exit(1); }
                 _ => { ctx.core.shutdown().ok(); }
             }
@@ -198,12 +198,12 @@ pub const COMMANDS: &[Command] = &[
     // Debugging command
     Command::new("debug_cmd")
         .hidden()
-        .terminal_only()
+        .required_privilege(PrivilegeLevel::BotOwner)
         .exec(|ctx| {
-            match ctx.arg_raw(0)? {
-                "error" => bail!("debug error"),
-                "panic" => panic!("debug panic"),
-                _ => cmd_error!("unknown debugging command"),
+            match ctx.arg(0)? {
+                "test_error" => bail!("Error triggered by command."),
+                "test_panic" => panic!("Panic triggered by command."),
+                _ => cmd_error!("Unknown debug command."),
             }
         })
 ];
