@@ -141,9 +141,6 @@ impl RoleManager {
     pub fn set_active_role(
         &self, guild: GuildId, rule_name: &str, discord_role: Option<RoleId>
     ) -> Result<()> {
-        let limits_enabled = self.config.get(None, ConfigKeys::RolesEnableLimits)?;
-        let max_assigned = self.config.get(None, ConfigKeys::RolesMaxAssigned)?;
-
         let conn = self.database.connect()?;
         conn.transaction_immediate(|| {
             let role_exists = VerificationRule::has_builtin(rule_name) || conn.query_cached(
@@ -155,7 +152,9 @@ impl RoleManager {
                 cmd_error!("No such rule '{}' exists.", rule_name);
             }
 
+            let limits_enabled = self.config.get(None, ConfigKeys::RolesEnableLimits)?;
             if limits_enabled {
+                let max_assigned = self.config.get(None, ConfigKeys::RolesMaxAssigned)?;
                 let assigned_count = conn.query_cached(
                     "SELECT COUNT(*) FROM discord_active_rules \
                      WHERE discord_guild_id = ?1 AND rule_name != ?2",

@@ -285,18 +285,18 @@ impl Verifier {
                discord_id.0, roblox_id.0);
 
         // Check cooldown
-        let max_attempts = self.config.get(None, ConfigKeys::VerificationAttemptLimit)?;
-        let verify_cooldown = self.config.get(None, ConfigKeys::VerificationCooldownSeconds)?;
         let result = conn.transaction_immediate(|| {
             let attempt_info = conn.query_cached(
                 "SELECT attempt_count, last_attempt FROM roblox_verification_cooldown \
                  WHERE discord_user_id = ?1", discord_id
             ).get_opt::<(u32, SystemTime)>()?;
             let new_attempt_count = if let Some((attempt_count, last_attempt)) = attempt_info {
-                let cooldown_ends = last_attempt + Duration::from_secs(verify_cooldown);
+                let max_attempts = self.config.get(None, ConfigKeys::VerificationAttemptLimit)?;
+                let cooldown = self.config.get(None, ConfigKeys::VerificationCooldownSeconds)?;
+                let cooldown_ends = last_attempt + Duration::from_secs(cooldown);
                 if attempt_count >= max_attempts && SystemTime::now() < cooldown_ends {
                     return Ok(VerifyResult::TooManyAttempts {
-                        max_attempts, cooldown: verify_cooldown, cooldown_ends
+                        max_attempts, cooldown, cooldown_ends
                     })
                 }
                 attempt_count + 1
@@ -348,9 +348,9 @@ impl Verifier {
         }
 
         // Attempt to verify user
-        let allow_reverification = self.config.get(None, ConfigKeys::AllowReverification)?;
-        let reverify_cooldown = self.config.get(None, ConfigKeys::ReverificationCooldownSeconds)?;
         conn.transaction_immediate(|| {
+            let allow_reverification = self.config.get(None, ConfigKeys::AllowReverification)?;
+
             if !allow_reverification {
                 let verified_as = conn.query_cached(
                     "SELECT roblox_user_id FROM discord_user_info \
@@ -377,11 +377,11 @@ impl Verifier {
                         return Ok(VerifyResult::SenderVerifiedAs { other_roblox_id: roblox_id })
                     }
 
-                    let cooldown_ends = last_updated + Duration::from_secs(reverify_cooldown);
+                    let cooldown =
+                        self.config.get(None, ConfigKeys::ReverificationCooldownSeconds)?;
+                    let cooldown_ends = last_updated + Duration::from_secs(cooldown);
                     if SystemTime::now() < cooldown_ends {
-                        return Ok(VerifyResult::ReverifyOnCooldown {
-                            cooldown: reverify_cooldown, cooldown_ends
-                        })
+                        return Ok(VerifyResult::ReverifyOnCooldown { cooldown, cooldown_ends })
                     }
 
                     conn.execute_cached(
