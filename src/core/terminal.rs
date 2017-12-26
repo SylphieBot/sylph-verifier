@@ -27,7 +27,7 @@ impl CommandContextData for TerminalContext {
     fn message_content(&self) -> &str {
         &self.line
     }
-    fn respond(&self, message: &str, mention_user: bool) -> Result<()> {
+    fn respond(&self, message: &str) -> Result<()> {
         for line in message.split('\n') {
             info!(target: "$raw", "[Command #{}] {}", self.command_no, line);
         }

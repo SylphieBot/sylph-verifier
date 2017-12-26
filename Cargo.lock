@@ -581,7 +581,7 @@ dependencies = [
 [[package]]
 name = "linefeed"
 version = "0.3.0"
-source = "git+https://github.com/Lymia/linefeed.git?branch=concurrent-loggers#7e68c15c0ecc0ec71f42dcafdf331f7caeea5045"
+source = "git+https://github.com/Lymia/linefeed.git?branch=concurrent-loggers#12c80d530e6981de3c98d614b1538cc134d6a733"
 dependencies = [
  "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)",

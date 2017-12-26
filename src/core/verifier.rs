@@ -25,8 +25,8 @@ impl Token {
     fn from_str(token: &str) -> Result<Token> {
         let token = token.as_bytes();
         cmd_ensure!(token.len() == 6,
-                    "Verification token must be exactly 6 characters. Please check your \
-                     command and try again");
+                    "Verification token must be exactly 6 characters. Please check the code \
+                     you entered and try again");
 
         let mut chars = [0u8; 6];
         for i in 0..6 {
@@ -36,8 +36,8 @@ impl Token {
             } else if byte >= b'a' && byte <= b'z' {
                 chars[i] = byte - b'a' + b'A'
             } else {
-                cmd_error!("Verification tokens may only contain letters. Please check your \
-                            command and try again.")
+                cmd_error!("Verification tokens may only contain letters. Please check the code \
+                            you entered and try again.")
             }
         }
         Ok(Token(chars))
@@ -335,7 +335,7 @@ impl Verifier {
                          VALUES (?1, ?2, ?3, ?4)", (roblox_id, key_id, epoch, SystemTime::now()),
                     )?;
                 }
-                TokenStatus::Outdated(rekey_reason) =>
+                TokenStatus::Outdated(_) =>
                     return Ok(VerifyResult::VerificationPlaceOutdated),
                 TokenStatus::NotVerified =>
                     return Ok(VerifyResult::InvalidToken),

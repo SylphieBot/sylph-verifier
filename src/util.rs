@@ -1,7 +1,6 @@
 use errors::*;
 use parking_lot::RwLock;
 use reqwest;
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::time::SystemTime;
@@ -65,11 +64,4 @@ pub fn sprunge(text: &str) -> Result<String> {
     let client = reqwest::Client::new();
     let mut result = client.post("http://sprunge.us/").form(&params).send()?.error_for_status()?;
     Ok(result.text()?.trim().to_string())
-}
-pub fn cmd_sprunge<'a>(text: &'a str) -> Result<Cow<'a, str>> {
-    if text.len() > 1900 {
-        Ok(sprunge(text)?.into())
-    } else {
-        Ok(text.into())
-    }
 }

@@ -18,7 +18,7 @@ mod terminal;
 mod verifier;
 
 pub use self::config::{ConfigManager, ConfigKey, ConfigKeys};
-pub use self::roles::{RoleManager, AssignedRole};
+pub use self::roles::{RoleManager, AssignedRole, ConfiguredRole};
 pub use self::verifier::{Verifier, VerifyResult, TokenStatus, RekeyReason};
 
 use self::discord::DiscordManager;
@@ -67,7 +67,7 @@ impl CommandSender {
             Some(core) => command.run(ctx, &core),
             None => {
                 ctx.respond("The bot is currently shutting down. Please wait until it is \
-                             restarted.", true).ok();
+                             restarted.").ok();
             }
         }
     }

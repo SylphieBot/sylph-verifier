@@ -32,16 +32,14 @@ impl <'a> CommandContextData for DiscordContext<'a> {
     fn message_content(&self) -> &str {
         self.content
     }
-    fn respond(&self, message: &str, mention_user: bool) -> Result<()> {
-        self.message.channel_id.send_message(|m| if mention_user {
+    fn respond(&self, message: &str) -> Result<()> {
+        self.message.channel_id.send_message(|m|
             if message.contains('\n') {
                 m.content(format_args!("<@{}>\n{}", self.message.author.id, message))
             } else {
                 m.content(format_args!("<@{}> {}", self.message.author.id, message))
             }
-        } else {
-            m.content(format_args!("{}", message))
-        })?;
+        )?;
         Ok(())
     }
     fn discord_context(&self) -> Option<(&Context, &Message)> {

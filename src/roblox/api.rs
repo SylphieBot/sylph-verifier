@@ -7,8 +7,8 @@ use std::collections::{HashSet, HashMap};
 
 #[derive(Deserialize)]
 struct RobloxIDLookup {
-    #[serde(rename = "Id")] id: u64,
-    #[serde(rename = "Username")] name: String,
+    #[serde(rename = "Id")] id: Option<u64>,
+    #[serde(rename = "Username")] name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -37,19 +37,19 @@ struct RobloxGroupLookup {
     #[serde(rename = "Rank")] rank: u32,
 }
 
-pub fn for_username(name: &str) -> Result<RobloxUserID> {
+pub fn for_username(name: &str) -> Result<Option<RobloxUserID>> {
     let uri = format!("https://api.roblox.com/users/get-by-username?username={}",
                       percent_encode(name.as_bytes(), QUERY_ENCODE_SET));
     let json = reqwest::get(&uri)?.error_for_status()?.text()?;
     let info = serde_json::from_str::<RobloxIDLookup>(&json)?;
-    Ok(RobloxUserID(info.id))
+    Ok(info.id.map(RobloxUserID))
 }
 
 pub fn lookup_username(id: RobloxUserID) -> Result<String> {
     let uri = format!("https://api.roblox.com/users/{}", id.0);
     let json = reqwest::get(&uri)?.error_for_status()?.text()?;
     let info = serde_json::from_str::<RobloxIDLookup>(&json)?;
-    Ok(info.name)
+    Ok(info.name.expect("Roblox ID not found?"))
 }
 
 pub fn get_dev_trust_level(name: &str) -> Result<Option<u32>> {

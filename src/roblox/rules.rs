@@ -655,7 +655,7 @@ impl VerificationSet {
         let mut ctx = VerificationCountContext::new();
         for op in &self.ops {
             match *op {
-                RuleOp::CheckBadge(ref name) => ctx.uses_badges(),
+                RuleOp::CheckBadge(_) => ctx.uses_badges(),
                 RuleOp::CheckPlayerBadge(id) => ctx.uses_has_player_badge(id),
                 RuleOp::CheckOwnsAsset(asset) => ctx.uses_owns_asset(asset),
                 RuleOp::CheckInGroup(_, _) => ctx.uses_groups(),

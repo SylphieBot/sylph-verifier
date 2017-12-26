@@ -248,25 +248,18 @@ impl <'a> CommandContext<'a> {
         self.data.prefix()
     }
     pub fn respond<S: AsRef<str>>(&self, message: S) -> Result<()> {
-        self.data.respond(message.as_ref().trim(), true)
-    }
-    pub fn respond_raw<S: AsRef<str>>(&self, message: S) -> Result<()> {
-        self.data.respond(message.as_ref().trim(), false)
+        self.data.respond(message.as_ref().trim())
     }
     pub fn discord_context(&self) -> Option<(&Context, &Message)> {
         self.data.discord_context()
     }
 
-    pub fn error<S: AsRef<str>>(&self, s: S) -> Result<!> {
-        cmd_error!(s.as_ref())
-    }
-
     fn catch_error<F, T>(&self, f: F) -> Result<T> where F: FnOnce() -> Result<T> {
-        error_report::catch_error(|| match f() {
-            Ok(x) => Ok(x),
+        match error_report::catch_error(|| match f() {
+            Ok(v) => Ok(Ok(v)),
             Err(Error(box (ErrorKind::CommandError(err), _))) => {
                 self.respond(&err)?;
-                bail!(ErrorKind::CommandError(err))
+                Ok(Err(ErrorKind::CommandError(err).into()))
             }
             Err(e) => {
                 self.respond("The command encountered an unexpected error. \
@@ -274,7 +267,10 @@ impl <'a> CommandContext<'a> {
                 error!("Command encountered an unexpected error!");
                 Err(e)
             }
-        })
+        }) {
+            Ok(Ok(v)) => Ok(v),
+            Err(e) | Ok(Err(e)) => Err(e),
+        }
     }
 
     pub fn get_guild(&self) -> Result<Option<GuildId>> {
@@ -349,7 +345,7 @@ pub trait CommandContextData {
 
     fn prefix(&self) -> &str;
     fn message_content(&self) -> &str;
-    fn respond(&self, message: &str, mention_user: bool) -> Result<()>;
+    fn respond(&self, message: &str) -> Result<()>;
 
     fn discord_context(&self) -> Option<(&Context, &Message)> { None }
 }

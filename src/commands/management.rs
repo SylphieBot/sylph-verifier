@@ -2,9 +2,6 @@ use super::*;
 
 use std::process::exit;
 
-const LOG_LEVEL_FILTER_ERROR: &str =
-    "Could not parse log level. [valid levels: trace, debug, info, warn, error, off]";
-
 fn parse_as<R : FromStr>(s: &str, err: &str) -> Result<R> {
     match s.parse() {
         Ok(r) => Ok(r),
@@ -107,15 +104,6 @@ lazy_static! {
     };
 }
 
-fn check_option_access(option: &ConfigOption, guild: Option<GuildId>) -> Result<()> {
-    match guild {
-        Some(guild) => {
-            cmd_ensure!(option.allow_guild, "This option cannot be set per-guild.");
-            Ok(())
-        }
-        None => Ok(()),
-    }
-}
 fn set_config(ctx: &CommandContext, guild: Option<GuildId>) -> Result<()> {
     if ctx.argc() == 0 {
         let mut config = String::new();

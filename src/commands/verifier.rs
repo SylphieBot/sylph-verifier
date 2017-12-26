@@ -1,5 +1,6 @@
 use super::*;
 
+use chrono::{DateTime, Utc};
 use roblox::*;
 use std::time::SystemTime;
 use util;
@@ -91,9 +92,47 @@ fn do_verify(ctx: &CommandContext, discord_ctx: &Context, msg: &Message) -> Resu
     }
 }
 
+fn check_configuration(ctx: &CommandContext, guild_id: GuildId) -> Result<()> {
+    if let Some(err) = ctx.core.roles().check_error(guild_id)? {
+        ctx.respond(format!("The role configuration has been successfully updated. However, \
+                             errors were found in the configuration: {}", err))
+    } else {
+        ctx.respond("The role configuration has been successfully updated.")
+    }
+}
+
 // TODO: Support roles by <@id> and id.
-// TODO: Check validity after configuration commands.
 pub const COMMANDS: &[Command] = &[
+    Command::new("show_config")
+        .help(None, "Shows the role configuration for the current channel.")
+        .required_permissions(enum_set!(DiscordPermission::ManageRoles))
+        .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
+        .exec_discord(|ctx, _, msg| {
+            let guild_id = msg.guild_id().chain_err(|| "Guild ID not found.")?;
+
+            let mut config = String::new();
+            let config_map = ctx.core.roles().get_configuration(guild_id)?;
+            let mut role_names: Vec<&str> = config_map.keys().map(|x| x.as_str()).collect();
+            role_names.sort();
+            for role in role_names {
+                let role_data = &config_map[role];
+                let definition = role_data.custom_rule.as_ref()
+                    .map(|x| format!("`{}`", x))
+                    .unwrap_or_else(|| if VerificationRule::has_builtin(role) {
+                        "*(builtin)*".to_string()
+                    } else {
+                        "**(does not exist)**".to_string()
+                    });
+                writeln!(config, "• {} = {}", role, definition)?;
+                if let Some((_, ref role_name)) = role_data.role_data {
+                    writeln!(config, "   Users matching this rule will be assigned **{}**.",
+                             role_name)?;
+                }
+                let date: DateTime<Utc> = role_data.last_updated.into();
+                writeln!(config, "   *Last updated at {} UTC*", date.format("%Y-%m-%d %H:%M:%S"))?;
+            }
+            ctx.respond(config)
+        }),
     Command::new("set_role")
         .help(Some("<rule name> [discord role name]"),
               "Sets the Discord role the bot will set when a rule is matched.")
@@ -108,7 +147,7 @@ pub const COMMANDS: &[Command] = &[
                 {
                     let guild = guild_id.find().chain_err(|| "Guild not found.")?;
                     let guild = guild.read();
-                    for (role_id, ref role) in &guild.roles {
+                    for (_, ref role) in &guild.roles {
                         // TODO: Check that the sender can set the role. (rank check)
                         if role.name.trim() == role_name {
                             cmd_ensure!(found_role.is_none(),
@@ -118,14 +157,15 @@ pub const COMMANDS: &[Command] = &[
                     }
                 }
                 if let Some(role_id) = found_role {
-                    ctx.core.roles().set_active_role(guild_id, rule_name, Some(role_id))
+                    ctx.core.roles().set_active_role(guild_id, rule_name, Some(role_id))?;
                 } else {
                     cmd_error!("No role named '{}' found. Note that roles are case sensitive.",
                                role_name)
                 }
             } else {
-                ctx.core.roles().set_active_role(guild_id, rule_name, None)
+                ctx.core.roles().set_active_role(guild_id, rule_name, None)?;
             }
+            check_configuration(ctx, guild_id)
         }),
     Command::new("set_custom_rule")
         .help(Some("<rule name> [rule definition]"),
@@ -137,9 +177,33 @@ pub const COMMANDS: &[Command] = &[
             let definition = ctx.rest(1)?.trim();
             let guild_id = msg.guild_id().chain_err(|| "Guild ID not found.")?;
             if !definition.is_empty() {
-                ctx.core.roles().set_custom_rule(guild_id, rule_name, Some(definition))
+                ctx.core.roles().set_custom_rule(guild_id, rule_name, Some(definition))?;
             } else {
-                ctx.core.roles().set_custom_rule(guild_id, rule_name, None)
+                ctx.core.roles().set_custom_rule(guild_id, rule_name, None)?;
+            }
+            check_configuration(ctx, guild_id)
+        }),
+    Command::new("test_verify")
+        .help(Some("<roblox username>"), "Tests the results of your role configuration.")
+        .required_permissions(enum_set!(DiscordPermission::ManageRoles))
+        .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
+        .exec_discord(|ctx, _, msg| {
+            let roblox_username = ctx.arg(0)?;
+            let roblox_id = RobloxUserID::for_username(roblox_username)?;
+            let guild_id = msg.guild_id().chain_err(|| "Guild ID not found.")?;
+
+            let mut roles = String::new();
+            for role in ctx.core.roles().get_assigned_roles(guild_id, roblox_id)? {
+                writeln!(roles, "• {} {} **{}**",
+                         roblox_username,
+                         if role.is_assigned { "will be assigned" }
+                             else { "will not be assigned" },
+                         role.role_name)?
+            }
+            if roles.is_empty() {
+                ctx.respond("No roles are configured.")
+            } else {
+                ctx.respond(roles.trim())
             }
         }),
     Command::new("verify")
