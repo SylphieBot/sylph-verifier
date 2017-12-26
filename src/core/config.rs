@@ -210,14 +210,12 @@ impl ConfigManager {
                         let any = cache.as_mut().unwrap();
                         Ok(Any::downcast_ref::<T>(any.deref()).unwrap().clone())
                     } else {
-                        conn.transaction_immediate(|| {
-                            let value = match self.get_db(conn, None, key.0.db_name)? {
-                                Some(value) => serde_json::from_str::<T>(&value)?,
-                                None => (key.0.default)(),
-                            };
-                            *cache = Some(Box::new(value.clone()));
-                            Ok(value)
-                        })
+                        let value = match self.get_db(conn, None, key.0.db_name)? {
+                            Some(value) => serde_json::from_str::<T>(&value)?,
+                            None => (key.0.default)(),
+                        };
+                        *cache = Some(Box::new(value.clone()));
+                        Ok(value)
                     }
                 }
             }

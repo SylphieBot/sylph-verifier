@@ -351,7 +351,6 @@ impl Verifier {
         let allow_reverification = self.config.get(None, ConfigKeys::AllowReverification)?;
         let reverify_cooldown = self.config.get(None, ConfigKeys::ReverificationCooldownSeconds)?;
         conn.transaction_immediate(|| {
-
             if !allow_reverification {
                 let verified_as = conn.query_cached(
                     "SELECT roblox_user_id FROM discord_user_info \
