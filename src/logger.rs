@@ -21,6 +21,7 @@ impl LogPolicy {
 static LOG_POLICY: &'static [LogPolicy] = &[
     LogPolicy::new("sylph_verifier", LevelFilter::Info, LevelFilter::Trace),
     LogPolicy::new("hyper"         , LevelFilter::Info, LevelFilter::Info),
+    LogPolicy::new("tokio_core"    , LevelFilter::Info, LevelFilter::Info),
     LogPolicy::new("*"             , LevelFilter::Info, LevelFilter::Debug),
 ];
 

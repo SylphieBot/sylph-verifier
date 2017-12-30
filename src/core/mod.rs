@@ -13,12 +13,11 @@ mod config;
 mod discord;
 mod place;
 mod roles;
-mod statistics;
 mod terminal;
 mod verifier;
 
 pub use self::config::{ConfigManager, ConfigKey, ConfigKeys};
-pub use self::roles::{RoleManager, AssignedRole, ConfiguredRole};
+pub use self::roles::{RoleManager, AssignedRole, ConfiguredRole, SetRolesStatus};
 pub use self::verifier::{Verifier, VerifyResult, TokenStatus, RekeyReason};
 
 use self::discord::DiscordManager;
@@ -89,7 +88,7 @@ impl VerifierCore {
         let verifier = Verifier::new(config.clone(), database.clone())?;
         let discord = Mutex::new(DiscordManager::new(config.clone(), cmd_sender.clone()));
         let place = PlaceManager::new(place_target)?;
-        let roles = RoleManager::new(config.clone(), database.clone());
+        let roles = RoleManager::new(config.clone(), database.clone(), verifier.clone());
 
         Ok(VerifierCore(Arc::new(VerifierCoreData {
             status: AtomicU8::new(STATUS_STOPPED),

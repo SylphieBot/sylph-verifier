@@ -9,6 +9,7 @@ use roblox::*;
 use serenity::model::prelude::*;
 use sha2::Sha256;
 use std::fmt::{Display, Formatter, Write, Result as FmtResult};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const TOKEN_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -64,21 +65,21 @@ pub enum RekeyReason {
 }
 impl ToSql for RekeyReason {
     fn to_sql(&self) -> Result<ToSqlOutput> {
-        Ok(ValueRef::Text(match *self {
-            RekeyReason::InitialKey           => "InitialKey",
-            RekeyReason::ManualRekey          => "ManualRekey",
-            RekeyReason::OutdatedVersion      => "OutdatedVersion",
-            RekeyReason::TimeIncrementChanged => "TimeIncrementChanged",
+        Ok(ValueRef::Integer(match *self {
+            RekeyReason::InitialKey           => 0,
+            RekeyReason::ManualRekey          => 1,
+            RekeyReason::OutdatedVersion      => 2,
+            RekeyReason::TimeIncrementChanged => 3,
         }).into())
     }
 }
 impl FromSql for RekeyReason {
     fn from_sql(value: ValueRef) -> Result<Self> {
         match value {
-            ValueRef::Text("InitialKey"          ) => Ok(RekeyReason::InitialKey),
-            ValueRef::Text("ManualRekey"         ) => Ok(RekeyReason::ManualRekey),
-            ValueRef::Text("OutdatedVersion"     ) => Ok(RekeyReason::OutdatedVersion),
-            ValueRef::Text("TimeIncrementChanged") => Ok(RekeyReason::TimeIncrementChanged),
+            ValueRef::Integer(0) => Ok(RekeyReason::InitialKey),
+            ValueRef::Integer(1) => Ok(RekeyReason::ManualRekey),
+            ValueRef::Integer(2) => Ok(RekeyReason::OutdatedVersion),
+            ValueRef::Integer(3) => Ok(RekeyReason::TimeIncrementChanged),
             unk => bail!("Unknown SQLite value: {:?}", unk),
         }
     }
@@ -152,9 +153,8 @@ struct TokenContext {
 impl TokenContext {
     fn from_db_internal(conn: &DatabaseConnection) -> Result<Option<TokenContext>> {
         let mut results = conn.query_cached(
-            "SELECT id, key, time_increment, version, change_reason \
-                 FROM roblox_verification_keys \
-                 ORDER BY id DESC LIMIT ?1",
+            "SELECT id, key, time_increment, version, change_reason FROM verification_keys \
+             ORDER BY id DESC LIMIT ?1",
             1 + HISTORY_COUNT,
         ).get_all::<TokenParameters>()?;
         if results.is_empty() {
@@ -177,9 +177,9 @@ impl TokenContext {
         }
 
         conn.execute_cached(
-            "INSERT INTO roblox_verification_keys \
-                 (key, time_increment, version, change_reason, last_updated) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO verification_keys (\
+                key, time_increment, version, change_reason, last_updated\
+            ) VALUES (?1, ?2, ?3, ?4, ?5)",
             (key, time_increment, TOKEN_VERSION, change_reason, SystemTime::now())
         )?;
         Ok(TokenContext::from_db_internal(conn)?.chain_err(|| "Could not get newly created key!")?)
@@ -240,37 +240,39 @@ pub enum VerifyResult {
     ReverifyOnCooldown { cooldown: u64, cooldown_ends: SystemTime }
 }
 
-pub struct Verifier {
+struct VerifierData {
     config: ConfigManager, database: Database, token_ctx: RwLock<TokenContext>,
 }
+#[derive(Clone)]
+pub struct Verifier(Arc<VerifierData>);
 impl Verifier {
     pub fn new(config: ConfigManager, database: Database) -> Result<Verifier> {
         let ctx = TokenContext::from_db(&database.connect()?,
                                         config.get(None, ConfigKeys::TokenValiditySeconds)?)?;
-        Ok(Verifier { config, database, token_ctx: RwLock::new(ctx), })
+        Ok(Verifier(Arc::new(VerifierData { config, database, token_ctx: RwLock::new(ctx), })))
     }
 
     pub fn rekey(&self, force: bool) -> Result<bool> {
-        let mut lock = self.token_ctx.write();
+        let mut lock = self.0.token_ctx.write();
         let cur_id = lock.current.id;
         *lock = if force {
-            TokenContext::rekey(&self.database.connect()?,
-                                self.config.get(None, ConfigKeys::TokenValiditySeconds)?)?
+            TokenContext::rekey(&self.0.database.connect()?,
+                                self.0.config.get(None, ConfigKeys::TokenValiditySeconds)?)?
         } else {
-            TokenContext::from_db(&self.database.connect()?,
-                                  self.config.get(None, ConfigKeys::TokenValiditySeconds)?)?
+            TokenContext::from_db(&self.0.database.connect()?,
+                                  self.0.config.get(None, ConfigKeys::TokenValiditySeconds)?)?
         };
         Ok(cur_id != lock.current.id)
     }
 
     pub fn get_verified_roblox_user(&self, user: UserId) -> Result<Option<RobloxUserID>> {
-        let conn = self.database.connect()?;
+        let conn = self.0.database.connect()?;
         conn.query_cached(
             "SELECT roblox_user_id FROM discord_user_info WHERE discord_user_id = ?1", user
         ).get_opt()
     }
     pub fn get_verified_discord_user(&self, user: RobloxUserID) -> Result<Option<UserId>> {
-        let conn = self.database.connect()?;
+        let conn = self.0.database.connect()?;
         conn.query_cached(
             "SELECT discord_user_info FROM roblox_user_id WHERE discord_user_info = ?1", user
         ).get_opt()
@@ -279,7 +281,7 @@ impl Verifier {
     pub fn try_verify(
         &self, discord_id: UserId, roblox_id: RobloxUserID, token: &str,
     ) -> Result<VerifyResult> {
-        let conn = self.database.connect()?;
+        let conn = self.0.database.connect()?;
 
         debug!("Starting verification attempt: discord id {} -> roblox id {}",
                discord_id.0, roblox_id.0);
@@ -287,12 +289,12 @@ impl Verifier {
         // Check cooldown
         let result = conn.transaction_immediate(|| {
             let attempt_info = conn.query_cached(
-                "SELECT attempt_count, last_attempt FROM roblox_verification_cooldown \
+                "SELECT attempt_count, last_attempt FROM verification_cooldown \
                  WHERE discord_user_id = ?1", discord_id
             ).get_opt::<(u32, SystemTime)>()?;
             let new_attempt_count = if let Some((attempt_count, last_attempt)) = attempt_info {
-                let max_attempts = self.config.get(None, ConfigKeys::VerificationAttemptLimit)?;
-                let cooldown = self.config.get(None, ConfigKeys::VerificationCooldownSeconds)?;
+                let max_attempts = self.0.config.get(None, ConfigKeys::VerificationAttemptLimit)?;
+                let cooldown = self.0.config.get(None, ConfigKeys::VerificationCooldownSeconds)?;
                 let cooldown_ends = last_attempt + Duration::from_secs(cooldown);
                 if attempt_count >= max_attempts && SystemTime::now() < cooldown_ends {
                     return Ok(VerifyResult::TooManyAttempts {
@@ -304,9 +306,9 @@ impl Verifier {
                 1
             };
             conn.execute_cached(
-                "REPLACE INTO roblox_verification_cooldown \
-                     (discord_user_id, last_attempt, attempt_count) \
-                 VALUES (?1, ?2, ?3)", (discord_id, SystemTime::now(), new_attempt_count)
+                "REPLACE INTO verification_cooldown (\
+                    discord_user_id, last_attempt, attempt_count\
+                ) VALUES (?1, ?2, ?3)", (discord_id, SystemTime::now(), new_attempt_count)
             )?;
             Ok(VerifyResult::VerificationOk)
         })?;
@@ -317,7 +319,7 @@ impl Verifier {
 
         // Check token
         let result = conn.transaction_immediate(|| {
-            let token_ctx = self.token_ctx.read();
+            let token_ctx = self.0.token_ctx.read();
             match token_ctx.check_token(roblox_id, token)? {
                 TokenStatus::Verified { key_id, epoch } => {
                     let last_key = conn.query_cached(
@@ -349,7 +351,7 @@ impl Verifier {
 
         // Attempt to verify user
         conn.transaction_immediate(|| {
-            let allow_reverification = self.config.get(None, ConfigKeys::AllowReverification)?;
+            let allow_reverification = self.0.config.get(None, ConfigKeys::AllowReverification)?;
 
             if !allow_reverification {
                 let verified_as = conn.query_cached(
@@ -378,7 +380,7 @@ impl Verifier {
                     }
 
                     let cooldown =
-                        self.config.get(None, ConfigKeys::ReverificationCooldownSeconds)?;
+                        self.0.config.get(None, ConfigKeys::ReverificationCooldownSeconds)?;
                     let cooldown_ends = last_updated + Duration::from_secs(cooldown);
                     if SystemTime::now() < cooldown_ends {
                         return Ok(VerifyResult::ReverifyOnCooldown { cooldown, cooldown_ends })
@@ -401,6 +403,6 @@ impl Verifier {
     }
 
     pub fn add_config<'a>(&self, config: &'a mut Vec<LuaConfigEntry>) {
-        self.token_ctx.read().current.add_config(config)
+        self.0.token_ctx.read().current.add_config(config)
     }
 }

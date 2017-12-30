@@ -1,8 +1,10 @@
 use errors::*;
 use parking_lot::RwLock;
 use reqwest;
+use serenity::model::prelude::*;
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
 
 fn div_ceil(a: u64, b: u64) -> u64 {
@@ -57,6 +59,13 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
     }
 }
 
+// Command IDs
+static COMMAND_ID: AtomicUsize = AtomicUsize::new(0);
+pub fn command_id() -> usize {
+    COMMAND_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+// Pasting text
 pub fn sprunge(text: &str) -> Result<String> {
     let mut params = HashMap::new();
     params.insert("sprunge", text);
@@ -64,4 +73,39 @@ pub fn sprunge(text: &str) -> Result<String> {
     let client = reqwest::Client::new();
     let mut result = client.post("http://sprunge.us/").form(&params).send()?.error_for_status()?;
     Ok(result.text()?.trim().to_string())
+}
+
+// TODO: Wait for these to be added to Serenity.
+#[derive(Ord, PartialOrd, Eq, PartialEq)]
+enum RolePosition {
+    Nobody, Role(i64), GuildOwner,
+}
+fn can_access(from: RolePosition, to: RolePosition) -> bool {
+    if from == RolePosition::GuildOwner {
+        true
+    } else {
+        from > to
+    }
+}
+fn member_position(member: &Member) -> Result<RolePosition> {
+    let owner_id = member.guild_id.find().chain_err(|| "Could not get guild.")?;
+    let owner_id = owner_id.read().owner_id;
+    if member.user.read().id == owner_id {
+        Ok(RolePosition::GuildOwner)
+    } else {
+        let roles = member.roles().chain_err(|| "Could not get roles.")?;
+        if roles.is_empty() {
+            Ok(RolePosition::Nobody)
+        } else {
+            Ok(RolePosition::Role(roles.iter().map(|x| x.position).max().unwrap()))
+        }
+    }
+}
+pub fn can_member_access_role(member: &Member, role: RoleId) -> Result<bool> {
+    let role_position =
+        RolePosition::Role(role.find().chain_err(|| "Could not get role.")?.position);
+    Ok(can_access(member_position(member)?, role_position))
+}
+pub fn can_member_access_member(from: &Member, to: &Member) -> Result<bool> {
+    Ok(can_access(member_position(from)?, member_position(to)?))
 }

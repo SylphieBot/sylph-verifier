@@ -1,20 +1,21 @@
 use core::config::*;
+use core::verifier::*;
 use database::*;
 use errors::*;
 use parking_lot::RwLock;
+use serenity;
 use serenity::model::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem::drop;
-use std::time::SystemTime;
+use std::time::{SystemTime, Duration};
 use roblox::{VerificationSet, VerificationRule, RobloxUserID};
+use util;
 use util::ConcurrentCache;
-
-// TODO: Update role_name to reflect role name changes in Discord.
 
 enum VerificationSetStatus {
     NotCompiled,
     Error(String),
-    Compiled(VerificationSet, HashMap<String, (RoleId, String)>),
+    Compiled(VerificationSet, HashMap<String, RoleId>),
 }
 impl VerificationSetStatus {
     pub fn is_compiled(&self) -> bool {
@@ -26,20 +27,22 @@ impl VerificationSetStatus {
 }
 
 pub struct ConfiguredRole {
-    pub role_data: Option<(RoleId, String)>, pub custom_rule: Option<String>,
-    pub last_updated: SystemTime,
+    pub role_id: Option<RoleId>, pub custom_rule: Option<String>, pub last_updated: SystemTime,
 }
 pub struct AssignedRole {
-    pub rule: String, pub role_id: RoleId, pub role_name: String, pub is_assigned: bool,
+    pub rule: String, pub role_id: RoleId, pub is_assigned: bool,
+}
+pub enum SetRolesStatus {
+    Success, IsAdmin,
 }
 
 pub struct RoleManager {
-    config: ConfigManager, database: Database,
+    config: ConfigManager, database: Database, verifier: Verifier,
     rule_cache: ConcurrentCache<GuildId, RwLock<VerificationSetStatus>>,
 }
 impl RoleManager {
-    pub fn new(config: ConfigManager, database: Database) -> RoleManager {
-        RoleManager { config, database, rule_cache: ConcurrentCache::new() }
+    pub fn new(config: ConfigManager, database: Database, verifier: Verifier) -> RoleManager {
+        RoleManager { config, database, verifier, rule_cache: ConcurrentCache::new() }
     }
 
     fn get_configuration_internal(
@@ -47,21 +50,21 @@ impl RoleManager {
     ) -> Result<(HashMap<String, ConfiguredRole>, usize)> {
         // We don't have FULL OUTER JOIN in sqlite, so, we improvise a bit.
         let active_rules_list = conn.query_cached(
-            "SELECT rule_name, discord_role_id, discord_role_name, last_updated \
-             FROM discord_active_rules \
+            "SELECT rule_name, discord_role_id, last_updated \
+             FROM guild_active_rules \
              WHERE discord_guild_id = ?1", guild
-        ).get_all::<(String, RoleId, String, SystemTime)>()?;
+        ).get_all::<(String, RoleId, SystemTime)>()?;
         let custom_roles_list = conn.query_cached(
             "SELECT rule_name, condition, last_updated \
-             FROM discord_custom_rules \
+             FROM guild_custom_rules \
              WHERE discord_guild_id = ?1", guild,
         ).get_all::<(String, String, SystemTime)>()?;
 
         let active_rules_count = active_rules_list.len();
         let mut map = HashMap::new();
-        for (rule_name, role_id, role_name, last_updated) in active_rules_list {
+        for (rule_name, role_id, last_updated) in active_rules_list {
             map.insert(rule_name, ConfiguredRole {
-                role_data: Some((role_id, role_name)), custom_rule: None, last_updated,
+                role_id: Some(role_id), custom_rule: None, last_updated,
             });
         }
         for (rule_name, condition, last_updated) in custom_roles_list {
@@ -72,7 +75,7 @@ impl RoleManager {
                 }
             } else {
                 map.insert(rule_name, ConfiguredRole {
-                    role_data: None, custom_rule: Some(condition), last_updated,
+                    role_id: None, custom_rule: Some(condition), last_updated,
                 });
             }
         }
@@ -100,7 +103,7 @@ impl RoleManager {
 
         let mut active_rule_names = Vec::new();
         for (rule, config) in &configuration {
-            if config.role_data.is_some() {
+            if config.role_id.is_some() {
                 active_rule_names.push(rule.as_str());
             }
         }
@@ -138,8 +141,8 @@ impl RoleManager {
 
                 let mut active_rules = HashMap::new();
                 for (rule, config) in configuration {
-                    if let Some(role_data) = config.role_data {
-                        active_rules.insert(rule, role_data);
+                    if let Some(role_id) = config.role_id {
+                        active_rules.insert(rule, role_id);
                     }
                 }
 
@@ -179,7 +182,7 @@ impl RoleManager {
         let conn = self.database.connect()?;
         conn.transaction_immediate(|| {
             let role_exists = VerificationRule::has_builtin(rule_name) || conn.query_cached(
-                "SELECT COUNT(*) FROM discord_custom_rules \
+                "SELECT COUNT(*) FROM guild_custom_rules \
                  WHERE discord_guild_id = ?1 AND rule_name = ?2",
                 (guild, rule_name)
             ).get::<u32>()? != 0;
@@ -191,7 +194,7 @@ impl RoleManager {
             if limits_enabled {
                 let max_assigned = self.config.get(None, ConfigKeys::RolesMaxAssigned)?;
                 let assigned_count = conn.query_cached(
-                    "SELECT COUNT(*) FROM discord_active_rules \
+                    "SELECT COUNT(*) FROM guild_active_rules \
                      WHERE discord_guild_id = ?1 AND rule_name != ?2",
                     (guild, rule_name)
                 ).get::<u32>()?;
@@ -203,20 +206,15 @@ impl RoleManager {
             }
 
             if let Some(discord_role) = discord_role {
-                let rwlock = guild.find().chain_err(|| "Guild not found.")?;
-                let lock = rwlock.read();
-                let role_obj = lock.roles.get(&discord_role).chain_err(|| "Role not found.")?;
-                let role_name = &role_obj.name;
                 conn.execute_cached(
-                    "REPLACE INTO discord_active_rules (\
-                        discord_guild_id, rule_name, discord_role_id, discord_role_name, \
-                        last_updated\
-                    ) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    (guild, rule_name, discord_role, role_name, SystemTime::now())
+                    "REPLACE INTO guild_active_rules (\
+                        discord_guild_id, rule_name, discord_role_id, last_updated\
+                    ) VALUES (?1, ?2, ?3, ?4)",
+                    (guild, rule_name, discord_role, SystemTime::now())
                 )?;
             } else {
                 conn.execute_cached(
-                    "DELETE FROM discord_active_rules \
+                    "DELETE FROM guild_active_rules \
                      WHERE discord_guild_id = ?1 AND rule_name = ?2",
                     (guild, rule_name)
                 )?;
@@ -236,14 +234,14 @@ impl RoleManager {
                 Err(err) => cmd_error!("Failed to parse custom rule: {}", err),
             }
             self.database.connect()?.execute_cached(
-                "REPLACE INTO discord_custom_rules (\
+                "REPLACE INTO guild_custom_rules (\
                     discord_guild_id, rule_name, condition, last_updated\
                 ) VALUES (?1, ?2, ?3, ?4)",
                 (guild, rule_name, condition, SystemTime::now())
             )?;
         } else {
             self.database.connect()?.execute_cached(
-                "DELETE FROM discord_custom_rules \
+                "DELETE FROM guild_custom_rules \
                  WHERE discord_guild_id = ?1 AND rule_name = ?2",
                 (guild, rule_name)
             )?;
@@ -270,11 +268,9 @@ impl RoleManager {
                 VerificationSetStatus::Compiled(ref rule_set, ref role_info) => {
                     let mut vec = Vec::new();
                     for (rule_name, is_assigned) in rule_set.verify(roblox_id)? {
-                        let (discord_role_id, ref discord_role_name) = role_info[rule_name];
+                        let discord_role_id = role_info[rule_name];
                         vec.push(AssignedRole {
-                            rule: rule_name.to_string(),
-                            role_id: discord_role_id, role_name: discord_role_name.clone(),
-                            is_assigned,
+                            rule: rule_name.to_string(), role_id: discord_role_id, is_assigned,
                         })
                     }
                     vec
@@ -285,5 +281,78 @@ impl RoleManager {
                 VerificationSetStatus::NotCompiled => unreachable!(),
             })
         })
+    }
+
+    pub fn assign_roles(
+        &self, guild: GuildId, discord_id: UserId, roblox_id: Option<RobloxUserID>
+    ) -> Result<SetRolesStatus> {
+        let member = guild.member(discord_id)?;
+        let me_member = guild.member(serenity::CACHE.read().user.id)?;
+        let can_access_user = util::can_member_access_member(&me_member, &member)?;
+        let do_set_username = self.config.get(Some(guild), ConfigKeys::SetUsername)?;
+
+        let set_username = if can_access_user && do_set_username {
+            let target_nickname = if let Some(roblox_id) = roblox_id {
+                Some(roblox_id.lookup_username()?)
+            } else {
+                None
+            };
+            if target_nickname != member.nick {
+                Some(target_nickname.unwrap_or_else(|| "".to_string()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let orig_roles: HashSet<RoleId> = member.roles.iter().map(|x| *x).collect();
+        let mut roles = orig_roles.clone();
+        if let Some(roblox_id) = roblox_id {
+            let assigned_roles = self.get_assigned_roles(guild, roblox_id)?;
+            for role in assigned_roles {
+                if role.is_assigned {
+                    roles.insert(role.role_id);
+                } else {
+                    roles.remove(&role.role_id);
+                }
+            }
+        } else {
+            let config = self.get_configuration(guild)?;
+            for (_, role) in config {
+                if let Some(id) = role.role_id {
+                    roles.remove(&id);
+                }
+            }
+        }
+        let set_roles: Option<Vec<RoleId>> = if orig_roles != roles {
+            Some(roles.drain().collect())
+        } else {
+            None
+        };
+
+        trace!("Assigning username to {}: {:?}", member.distinct(), set_username);
+        trace!("Assigning roles to {}: {:?}", member.distinct(), set_roles);
+
+        if set_username.is_some() || set_roles.is_some() {
+            member.edit(|mut edit| {
+                if let Some(username) = set_username {
+                    edit = edit.nickname(&username);
+                }
+                if let Some(roles) = set_roles {
+                    edit = edit.roles(&roles)
+                }
+                edit
+            })?;
+        }
+        Ok(if !can_access_user && do_set_username {
+            SetRolesStatus::IsAdmin
+        } else {
+            SetRolesStatus::Success
+        })
+    }
+    pub fn update_user(&self, guild: GuildId, discord_id: UserId,
+                       cooldown: Option<Duration>) -> Result<SetRolesStatus> {
+        self.assign_roles(guild, discord_id, self.verifier.get_verified_roblox_user(discord_id)?)
     }
 }

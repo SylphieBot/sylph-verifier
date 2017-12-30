@@ -8,7 +8,7 @@ use logger;
 use parking_lot::Mutex;
 use std::io;
 use std::thread;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use util;
 
 struct TerminalContext {
     line: String, command_no: usize,
@@ -34,8 +34,6 @@ impl CommandContextData for TerminalContext {
         Ok(())
     }
 }
-
-static COMMAND_ID: AtomicUsize = AtomicUsize::new(0);
 
 pub struct Terminal {
     cmd_sender: CommandSender, sender: Mutex<Option<LogSender>>,
@@ -70,7 +68,7 @@ impl Terminal {
                             last_line = line.to_owned();
                         }
 
-                        let command_no = COMMAND_ID.fetch_add(1, Ordering::Relaxed);
+                        let command_no = util::command_id();
                         if let Some(command) = get_command(line) {
                             let ctx = TerminalContext {
                                 line: line.to_owned(), command_no,
@@ -81,7 +79,7 @@ impl Terminal {
                             } else {
                                 let cmd_sender = self.cmd_sender.clone();
                                 thread::Builder::new()
-                                    .name(format!("terminal command #{}", ctx.command_no + 1))
+                                    .name(format!("command #{}", ctx.command_no + 1))
                                     .spawn(move || cmd_sender.run_command(command, &ctx))?;
                                 thread::yield_now();
                             }
