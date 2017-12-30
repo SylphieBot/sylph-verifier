@@ -31,6 +31,7 @@ lazy_static!(
     };
 );
 
+#[derive(Debug)]
 enum Token<'a> {
     Term(&'a str, &'a str), Literal(bool), Not, Or, And, OpenParen, CloseParen,
 }
@@ -73,8 +74,14 @@ fn tokenize_rule(rule: &str) -> Result<VecDeque<Token>> {
     while current_pos < rule.len() {
         current_pos = advance_whitespace(rule, current_pos);
         match rule[current_pos] {
-            b'(' => tokens.push_back(Token::OpenParen),
-            b')' => tokens.push_back(Token::CloseParen),
+            b'(' => {
+                tokens.push_back(Token::OpenParen);
+                current_pos += 1;
+            }
+            b')' => {
+                tokens.push_back(Token::CloseParen);
+                current_pos += 1;
+            }
             c if is_ident_char(c) => {
                 let token_start = current_pos;
                 current_pos += 1;
@@ -97,13 +104,13 @@ fn tokenize_rule(rule: &str) -> Result<VecDeque<Token>> {
                             current_pos += 1;
                         }
                         let term_body = from_utf8(&rule[body_start..current_pos])?;
-                        tokens.push_back(Token::Term(term_start, term_body.trim()))
+                        tokens.push_back(Token::Term(term_start, term_body.trim()));
+                        current_pos += 1;
                     }
                 }
             }
             c => cmd_error!("Unexpected character: '{}'", c),
         }
-        current_pos += 1;
     }
     Ok(tokens)
 }
@@ -254,7 +261,7 @@ impl CompileContext {
         }
         Ok(())
     }
-    fn pop_close_paren(&mut self) -> Result<()> {
+    fn pop_open_paren(&mut self) -> Result<()> {
         if let Some((CompileOperator::OpenParen, _)) = self.op_stack.pop() {
             Ok(())
         } else {
@@ -325,7 +332,7 @@ impl VerificationRule {
                 match token {
                     Token::CloseParen => {
                         ctx.pop_op_stack(CompileOperator::Any)?;
-                        ctx.pop_close_paren()?;
+                        ctx.pop_open_paren()?;
                     }
                     Token::And => {
                         ctx.pop_op_stack(CompileOperator::And)?;
