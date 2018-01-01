@@ -1,0 +1,253 @@
+use super::*;
+
+use core::VerifierCore;
+use std::fmt::Display;
+use util;
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum GuildShowType {
+    AlwaysShow, OnlyInTerminal, AlwaysHidden,
+}
+impl GuildShowType {
+    fn show_in(self, guild: Option<GuildId>) -> bool {
+        match self {
+            GuildShowType::AlwaysShow     => true,
+            GuildShowType::OnlyInTerminal => guild.is_none(),
+            GuildShowType::AlwaysHidden   => false,
+        }
+    }
+}
+
+fn parse_as<R : FromStr>(s: &str, err: &str) -> Result<R> {
+    match s.parse() {
+        Ok(r) => Ok(r),
+        Err(_) => cmd_error!("{}", err),
+    }
+}
+fn parse_bool(s: &str) -> Result<bool> {
+    parse_as(s, "Setting must be true or false.")
+}
+fn parse_u32(s: &str) -> Result<u32> {
+    parse_as(s, "Setting must be a non-negative number.")
+}
+fn parse_u64(s: &str) -> Result<u64> {
+    parse_as(s, "Setting must be a non-negative number.")
+}
+fn print_display<T : Display>(_: &VerifierCore, t: T) -> Result<String> {
+    Ok(format!("{}", t))
+}
+fn print_quoted<T : Display>(_: &VerifierCore, t: T) -> Result<String> {
+    Ok(format!("\"{}\"", t))
+}
+fn print_bounded_time(core: &VerifierCore, secs: u64, bound: ConfigKey<u64>) -> Result<String> {
+    let bound = core.config().get(None, bound)?;
+    Ok(format!("{}{}",
+               util::to_english_time_precise(secs),
+               if bound == 0 {
+                   String::new()
+               } else {
+                   format!(" *(This option has a minimum value of {} set.)*",
+                           util::to_english_time_precise(bound))
+               }))
+}
+fn show_if(core: &VerifierCore, key: ConfigKey<bool>) -> Result<GuildShowType> {
+    if core.config().get(None, key)? {
+        Ok(GuildShowType::AlwaysShow)
+    } else {
+        Ok(GuildShowType::AlwaysHidden)
+    }
+}
+fn show_in_terminal_if(core: &VerifierCore, key: ConfigKey<bool>) -> Result<GuildShowType> {
+    if core.config().get(None, key)? {
+        Ok(GuildShowType::OnlyInTerminal)
+    } else {
+        Ok(GuildShowType::AlwaysHidden)
+    }
+}
+
+macro_rules! config_values {
+    ($($config_name:ident<$tp:ty>(
+        $config_key:ident, $allow_guild:expr, $show_type:expr,
+        $help:expr, $from_str:expr, $to_str:expr $(,)*
+    );)*) => {
+        fn set_config(
+            core: &VerifierCore, guild: Option<GuildId>, key: &str, value: Option<&str>
+        ) -> Result<()> {
+            match key {
+                $(
+                    stringify!($config_name) => {
+                        cmd_ensure!(guild.is_none() || $allow_guild,
+                                    "This option cannot be set per-guild.");
+                        match value {
+                            Some(str) => {
+                                let from_str: fn(&str) -> Result<$tp> = $from_str;
+                                core.config().set(core, guild,
+                                                  ConfigKeys::$config_key, from_str(str)?)?;
+                            }
+                            None => core.config().reset(core, guild, ConfigKeys::$config_key)?,
+                        }
+                    }
+                )*
+                name => cmd_error!("No such configuration option '{}'.", name),
+            }
+            Ok(())
+        }
+
+        fn print_config(core: &VerifierCore, guild: Option<GuildId>) -> Result<String> {
+            let mut config = String::new();
+            let align = if guild.is_some() { "   " } else { "  " };
+            $({
+                let show_type: fn(&VerifierCore) -> Result<GuildShowType> = $show_type;
+
+                if show_type(core)?.show_in(guild) {
+                    let to_str: fn(&VerifierCore, $tp) -> Result<String> = $to_str;
+                    let value = core.config().get(guild, ConfigKeys::$config_key)?;
+                    writeln!(config, "• {} = {}{}",
+                             stringify!($config_name), to_str(core, value)?,
+                             if guild.is_some() && !$allow_guild {
+                                " *(This option cannot be overwritten per-server.)*".to_owned()
+                             } else {
+                                "".to_owned()
+                             })?;
+                    writeln!(config, "{}{}", align, $help)?;
+                }
+            })*
+            Ok(config)
+        }
+    }
+}
+config_values! {
+    prefix<String>(
+        CommandPrefix, false, |_| Ok(GuildShowType::AlwaysShow),
+        "The prefix used before commands.",
+        |x| Ok(x.to_owned()), print_quoted);
+    discord_token<Option<String>>(
+        DiscordToken, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "The bot token used to connect to Discord.",
+        |x|    Ok(Some(x.to_owned())),
+        |_, x| Ok(x.map_or("(not set)", |_| "<token redacted>").to_owned()));
+
+    roles_enable_limits<bool>(
+        RolesEnableLimits, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "Whether resource limits are enabled for verification rule sets.",
+        parse_bool, print_display);
+    roles_max_assigned<u32>(
+        RolesMaxAssigned, false, |x| show_if(x, ConfigKeys::RolesEnableLimits),
+        "The max number of roles that can be assigned in a server's configuration.",
+        parse_u32, print_display);
+    roles_max_custom_rules<u32>(
+        RolesMaxCustomRules, false, |x| show_if(x, ConfigKeys::RolesEnableLimits),
+        "The max number of custom rules that can exist in a server's configuration.",
+        parse_u32, print_display);
+    roles_max_instructions<u32>(
+        RolesMaxInstructions, false, |x| show_in_terminal_if(x, ConfigKeys::RolesEnableLimits),
+        "The maximum complexity of a role configuration.",
+        parse_u32, print_display);
+    roles_max_web_requests<u32>(
+        RolesMaxWebRequests, false, |x| show_in_terminal_if(x, ConfigKeys::RolesEnableLimits),
+        "The maximum number of web requests that a role configuration can make.",
+        parse_u32, print_display);
+
+    set_nickname<bool>(
+        SetNickname, true, |_| Ok(GuildShowType::AlwaysShow),
+        "Whether to set a user's nickname to their Roblox username while updating their roles.",
+        parse_bool, print_display);
+
+    allow_set_roles_on_join<bool>(
+        AllowSetRolesOnJoin, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "Whether servers can be configured to update a user's roles on server join.",
+        parse_bool, print_display);
+    set_roles_on_join<bool>(
+        SetRolesOnJoin, true, |x| show_if(x, ConfigKeys::AllowSetRolesOnJoin),
+        "Whether to set a user's roles on server join based on an existing verification.",
+        parse_bool, print_display);
+    allow_auto_update_roles<bool>(
+        AllowEnableAutoUpdate, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "Whether servers can be configured to periodically update a user's roles when they talk.",
+        parse_bool, print_display);
+    auto_update_roles<bool>(
+        EnableAutoUpdate, true, |x| show_if(x, ConfigKeys::AllowEnableAutoUpdate),
+        "Whether to periodically update a user's roles when they talk.",
+        parse_bool, print_display);
+
+    minimum_update_cooldown<u64>(
+        MinimumUpdateCooldownSeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "The minimum cooldown between manual role updates a server can configure.",
+        parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
+    update_cooldown<u64>(
+        UpdateCooldownSeconds, true, |_| Ok(GuildShowType::AlwaysShow),
+        "The number of seconds a user must wait between manual role updates.",
+        parse_u64, |c, x| print_bounded_time(c, x, ConfigKeys::MinimumUpdateCooldownSeconds));
+    minimum_auto_update_cooldown<u64>(
+        MinimumAutoUpdateCooldownSeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "The minimum cooldown between automatic role updates a server can configure.",
+        parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
+    auto_update_cooldown<u64>(
+        AutoUpdateCooldownSeconds, true, |_| Ok(GuildShowType::AlwaysShow),
+        "The number of seconds between automatic role updates.",
+        parse_u64, |c, x| print_bounded_time(c, x, ConfigKeys::MinimumAutoUpdateCooldownSeconds));
+
+    place_ui_title<String>(
+        PlaceUITitle, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "The title of the verification place UI.",
+        |x| Ok(x.to_owned()), print_quoted);
+    place_ui_instructions<String>(
+        PlaceUIInstructions, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "The instructions shown in the verification place UI.",
+        |x| Ok(x.to_owned()), print_quoted);
+    place_ui_background<Option<String>>(
+        PlaceUIBackground, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "The Asset ID shown in the verification place UI background.",
+        |x|    Ok(Some(x.to_owned())),
+        |_, x| Ok(x.unwrap_or_else(|| "(default)".to_owned())));
+    place_id<Option<u64>>(
+        PlaceID, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "The ID of the verification place. This is displayed in verification channel messages.",
+        |x| parse_u64(x).map(Some),
+        |_, x| Ok(x.map_or_else(|| "(none_set)".to_owned(), |x| format!("{}", x))));
+
+    verification_attempt_limit<u32>(
+        VerificationAttemptLimit, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "How many times a user can verify in a row before they must wait a period of time.",
+        parse_u32, print_display);
+    verification_cooldown<u64>(
+        VerificationCooldownSeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "How many seconds a user must wait to attempt to verify after using up the attempt limit.",
+        parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
+
+    token_validity<u32>(
+        TokenValiditySeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "How many seconds a verification token is valid for.",
+        parse_u32, |_, x| Ok(util::to_english_time_precise(x as u64)));
+
+    allow_reverification<bool>(
+        AllowReverification, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "Whether a user can reverify a Discord or Roblox account that is already verified.",
+        parse_bool, print_display);
+    reverification_cooldown<u64>(
+        ReverificationCooldownSeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "How many seconds a user must wait after verifying before they can reverify.",
+        parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
+}
+
+fn set(ctx: &CommandContext, guild: Option<GuildId>) -> Result<()> {
+    if ctx.argc() == 0 {
+        ctx.respond(print_config(&ctx.core, guild)?)
+    } else {
+        let key = ctx.arg(0)?;
+        let value = ctx.rest(1)?;
+        set_config(&ctx.core, guild, key, if value.trim().is_empty() { None } else { Some(value) })
+    }
+}
+
+pub const COMMANDS: &[Command] = &[
+    Command::new("set")
+        .help(Some("<key> [new value]"), "Sets a configuration value for this guild.")
+        .required_permissions(enum_set!(DiscordPermission::ManageGuild))
+        .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
+        .exec(|ctx| set(ctx, Some(ctx.get_guild()?.unwrap()))),
+    Command::new("set_global")
+        .help(Some("<key> [new value]"), "Sets a global configuration value.")
+        .terminal_only()
+        .exec(|ctx| set(ctx, None)),
+];

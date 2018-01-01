@@ -1,8 +1,9 @@
 use super::*;
 
 use serenity::model::prelude::*;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 use roblox::*;
+use util;
 
 impl <T : FromSql> FromSqlRow for T {
     fn from_sql_row(row: Row) -> Result<T> {
@@ -84,7 +85,7 @@ impl FromSql for RobloxUserID {
 }
 impl FromSql for SystemTime {
     fn from_sql(value: ValueRef) -> Result<Self> {
-        Ok(UNIX_EPOCH + Duration::from_secs(u64::from_sql(value)?))
+        Ok(util::time_from_i64(i64::from_sql(value)?)?)
     }
 }
 
@@ -149,7 +150,7 @@ impl ToSql for RobloxUserID {
 }
 impl ToSql for SystemTime {
     fn to_sql(&self) -> Result<ToSqlOutput> {
-        Ok(Value::Integer(self.duration_since(UNIX_EPOCH)?.as_secs() as i64).into())
+        Ok(Value::Integer(util::time_to_i64(*self)?).into())
     }
 }
 

@@ -14,6 +14,8 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;
 use util;
 
+// TODO: Implement SetOnJoin and UpdateOnMessage
+
 struct DiscordContext<'a> {
     ctx: Context, message: &'a Message, content: &'a str, prefix: String,
     privilege_level: PrivilegeLevel, command_target: CommandTarget, command_no: usize,
@@ -236,8 +238,8 @@ impl DiscordManager {
                     self.bot = Some(bot);
                 }
                 None => info!("No token configured for the Discord bot. Please use \
-                               \"set_global discord_token YOUR_DISCORD_TOKEN_HERE\" to configure \
-                               it, then use \"connect\" to connect to Discord."),
+                               \"set_global discord_token YOUR_DISCORD_TOKEN_HERE\" to \
+                               configure it."),
             }
         }
         Ok(())

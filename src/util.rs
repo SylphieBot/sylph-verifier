@@ -4,8 +4,8 @@ use reqwest;
 use serenity::model::prelude::*;
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::SystemTime;
+use std::sync::atomic::{AtomicUsize, AtomicI64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn div_ceil(a: u64, b: u64) -> u64 {
     if a == 0 {
@@ -30,11 +30,20 @@ pub fn to_english_time(secs: u64) -> String {
         english_pluralize(div_ceil(secs, 60 * 60), "hour", "hours")
     }
 }
+pub fn to_english_time_precise(secs: u64) -> String {
+    if secs < 60 {
+        english_pluralize(secs, "second", "seconds")
+    } else {
+        format!("{} = {}", english_pluralize(secs, "second", "seconds"), to_english_time(secs))
+    }
+}
 pub fn english_time_diff(from: SystemTime, to: SystemTime) -> String {
     to_english_time(to.duration_since(from).map(|x| x.as_secs()).unwrap_or(0))
 }
 
-pub struct ConcurrentCache<K: Clone + Eq + Hash + Sync, V: Sync>(RwLock<HashMap<K, V>>);
+// Concurrent cache implementation
+struct CacheValue<V: Sync>(V, AtomicI64);
+pub struct ConcurrentCache<K: Clone + Eq + Hash + Sync, V: Sync>(RwLock<HashMap<K, CacheValue<V>>>);
 impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
     pub fn new() -> Self {
         ConcurrentCache(RwLock::new(HashMap::new()))
@@ -46,16 +55,56 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
         {
             let read = self.0.read();
             if let Some(value) = read.get(k) {
-                return closure(value)
+                value.1.store(time_to_i64(SystemTime::now())?, Ordering::Relaxed);
+                return closure(&value.0)
             }
         }
 
         // None case
         let mut write = self.0.write();
         if write.get(k).is_none() {
-            write.insert(k.clone(), create()?);
+            let new = CacheValue(create()?, AtomicI64::new(time_to_i64(SystemTime::now())?));
+            write.insert(k.clone(), new);
         }
-        closure(&write[k])
+        closure(&write[k].0)
+    }
+
+    pub fn retain<F>(&self, mut f: F) where F: FnMut(&K, &mut V) -> bool {
+        self.0.write().retain(|k, v| f(k, &mut v.0));
+    }
+    pub fn clear_old(&self, cutoff_duration: Duration) {
+        let cutoff = SystemTime::now() - cutoff_duration;
+        self.0.write().retain(|_, v|
+            time_from_i64(v.1.load(Ordering::Relaxed)).unwrap() >= cutoff
+        );
+    }
+    pub fn clear_cache(&self) {
+        self.0.write().clear()
+    }
+}
+
+// Time to i64
+pub fn time_from_i64(time: i64) -> Result<SystemTime> {
+    ensure!(time != i64::min_value(), "time must not be i64::min_value()");
+    if time >= 0 {
+        Ok(UNIX_EPOCH + Duration::from_secs(time as u64))
+    } else {
+        Ok(UNIX_EPOCH - Duration::from_secs((-time) as u64))
+    }
+}
+fn check_u64_to_i64(val: u64, is_neg: bool) -> Result<i64> {
+    ensure!(val < i64::max_value() as u64, "time must fit in an i64");
+    if is_neg {
+        Ok(-(val as i64))
+    } else {
+        Ok(val as i64)
+    }
+}
+pub fn time_to_i64(time: SystemTime) -> Result<i64> {
+    if time >= UNIX_EPOCH {
+        check_u64_to_i64(time.duration_since(UNIX_EPOCH)?.as_secs(), false)
+    } else {
+        check_u64_to_i64(time.duration_since(UNIX_EPOCH)?.as_secs(), true)
     }
 }
 

@@ -350,6 +350,7 @@ pub trait CommandContextData {
     fn discord_context(&self) -> Option<(&Context, &Message)> { None }
 }
 
+mod config;
 mod management;
 mod verifier;
 
@@ -376,7 +377,7 @@ static CORE_COMMANDS: &'static [Command] = &[
 ];
 lazy_static! {
     static ref COMMANDS: CommandList = CommandList::new(&[
-        CORE_COMMANDS, management::COMMANDS, verifier::COMMANDS,
+        CORE_COMMANDS, config::COMMANDS, management::COMMANDS, verifier::COMMANDS,
     ]);
 }
 pub fn get_command(msg: &str) -> Option<&'static Command> {

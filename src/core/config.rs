@@ -1,3 +1,4 @@
+use core::VerifierCore;
 use database::*;
 use errors::*;
 use parking_lot::RwLock;
@@ -80,7 +81,7 @@ fn get_db_type_panic() -> ! {
 }
 
 macro_rules! config_keys {
-    ($($name:ident<$tp:ty>($default:expr);)*) => {
+    ($($name:ident<$tp:ty>($default:expr $(, $after_update:expr)* $(,)*);)*) => {
         #[derive(Copy, Clone)]
         enum ConfigKeyName {
             $($name,)*
@@ -116,9 +117,20 @@ macro_rules! config_keys {
                 }
                 Ok(())
             }
+            fn after_update(&self, core: &VerifierCore, name: ConfigKeyName) -> Result<()> {
+                match name {
+                    $(ConfigKeyName::$name => {
+                        $({
+                            let after_update: fn(&VerifierCore) -> Result<()> = $after_update;
+                            after_update(core)?;
+                        })*
+                    })*
+                }
+                Ok(())
+            }
 
             fn set<T: ToSql>(
-                &self, conn: &DatabaseConnection, guild: Option<GuildId>,
+                &self, core: &VerifierCore, conn: &DatabaseConnection, guild: Option<GuildId>,
                 key: ConfigKey<T>, value: T,
             ) -> Result<()> {
                 match key.enum_name {
@@ -129,15 +141,17 @@ macro_rules! config_keys {
                             set_db(conn, guild, stringify!($name), &value)?;
 
                             // This will only execute if transmute is an noop, so this is safe.
-                            let mut write_ptr = self.$name.write();
-                            let mut transmute: &mut Option<Option<T>> = unsafe {
-                                mem::transmute(write_ptr.deref_mut())
-                            };
-                            *transmute = Some(Some(value));
+                            {
+                                let mut write_ptr = self.$name.write();
+                                let mut transmute: &mut Option<Option<T>> = unsafe {
+                                    mem::transmute(write_ptr.deref_mut())
+                                };
+                                *transmute = Some(Some(value));
+                            }
                         }
                     })*
                 }
-                Ok(())
+                self.after_update(core, key.enum_name)
             }
             fn get<T: FromSql + Clone + 'static>(
                 &self, conn: &DatabaseConnection, guild: Option<GuildId>, key: ConfigKey<T>,
@@ -159,7 +173,8 @@ macro_rules! config_keys {
                 }
             }
             fn reset(
-                &self, conn: &DatabaseConnection, guild: Option<GuildId>, name: ConfigKeyName,
+                &self, core: &VerifierCore, conn: &DatabaseConnection, guild: Option<GuildId>,
+                name: ConfigKeyName,
             ) -> Result<()> {
                 match name {
                     $(ConfigKeyName::$name => {
@@ -171,7 +186,7 @@ macro_rules! config_keys {
                         }
                     })*
                 }
-                Ok(())
+                self.after_update(core, name)
             }
         }
 
@@ -189,38 +204,47 @@ macro_rules! config_keys {
 config_keys! {
     // Discord settings
     CommandPrefix<String>("!".to_owned());
-    DiscordToken<Option<String>>(None);
+    DiscordToken<Option<String>>(None, |core| core.reconnect_discord());
 
     // Limits for verification rules
-    RolesEnableLimits<bool>(false);
-    RolesMaxAssigned<u32>(15);
-    RolesMaxActiveCustomRules<u32>(15);
-    RolesMaxInstructions<u32>(500);
-    RolesMaxWebRequests<u32>(10);
+    RolesEnableLimits<bool>(false, |core| Ok(core.roles().clear_cache()));
+    RolesMaxAssigned<u32>(15, |core| Ok(core.roles().clear_cache()));
+    RolesMaxCustomRules<u32>(30, |core| Ok(core.roles().clear_cache()));
+    RolesMaxInstructions<u32>(500, |core| Ok(core.roles().clear_cache()));
+    RolesMaxWebRequests<u32>(10, |core| Ok(core.roles().clear_cache()));
 
     // Role management settings
-    SetUsername<bool>(true);
+    SetNickname<bool>(true);
+
+    AllowSetRolesOnJoin<bool>(true);
+    SetRolesOnJoin<bool>(true);
+    AllowEnableAutoUpdate<bool>(true);
+    EnableAutoUpdate<bool>(true);
+
+    MinimumUpdateCooldownSeconds<u64>(60 * 60);
     UpdateCooldownSeconds<u64>(60 * 60);
-
-    SetRolesOnJoin<bool>(false);
-
-    EnableAutoUpdate<bool>(false);
+    MinimumAutoUpdateCooldownSeconds<u64>(60 * 60);
     AutoUpdateCooldownSeconds<u64>(60 * 60 * 24);
 
     // Verification place settings
-    PlaceUITitle<String>("Roblox Account Verifier".to_owned());
+    PlaceUITitle<String>("Roblox Account Verifier".to_owned(), |core| core.refresh_place());
     PlaceUIInstructions<String>(
         "To verify your Roblox account with this Discord server, please enter the following \
-         command on the server.".to_owned()
+         command on the server.".to_owned(),
+         |core| core.refresh_place()
     );
-    PlaceUIBackground<Option<String>>(None);
+    PlaceUIBackground<Option<String>>(None, |core| core.refresh_place());
     PlaceID<Option<u64>>(None);
 
     // Verification settings
     VerificationAttemptLimit<u32>(10);
     VerificationCooldownSeconds<u64>(60 * 60 * 24);
 
-    TokenValiditySeconds<u32>(60 * 5);
+    TokenValiditySeconds<u32>(60 * 5, |core| {
+        core.verifier().rekey(false)?;
+        core.refresh_place()?;
+        Ok(())
+    });
 
     AllowReverification<bool>(false);
     ReverificationCooldownSeconds<u64>(60 * 60 * 24);
@@ -235,6 +259,7 @@ struct ConfigManagerData {
 pub struct ConfigManager(Arc<ConfigManagerData>);
 impl ConfigManager {
     pub fn new(database: Database) -> ConfigManager {
+        trace!("ConfigCache size: {}", mem::size_of::<ConfigCache>());
         ConfigManager(Arc::new(ConfigManagerData {
             database, global_cache: ConfigCache::new(), guild_cache: ConcurrentCache::new(),
         }))
@@ -250,17 +275,17 @@ impl ConfigManager {
     }
 
     pub fn set<T : ToSql + Clone + Any + Send + Sync>(
-        &self, guild: Option<GuildId>, key: ConfigKey<T>, val: T,
+        &self, core: &VerifierCore, guild: Option<GuildId>, key: ConfigKey<T>, val: T,
     ) -> Result<()> {
         self.get_cache(guild, |cache| {
-            cache.set(&self.0.database.connect()?, guild, key, val)
+            cache.set(core, &self.0.database.connect()?, guild, key, val)
         })
     }
     pub fn reset<T: Clone + Any + Send + Sync>(
-        &self, guild: Option<GuildId>, key: ConfigKey<T>
+        &self, core: &VerifierCore, guild: Option<GuildId>, key: ConfigKey<T>
     ) -> Result<()> {
         self.get_cache(guild, |cache| {
-            cache.reset(&self.0.database.connect()?, guild, key.enum_name)
+            cache.reset(core, &self.0.database.connect()?, guild, key.enum_name)
         })
     }
 

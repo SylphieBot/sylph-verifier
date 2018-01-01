@@ -47,27 +47,29 @@ impl RoleManager {
 
     fn get_configuration_internal(
         &self, conn: &DatabaseConnection, guild: GuildId
-    ) -> Result<(HashMap<String, ConfiguredRole>, usize)> {
+    ) -> Result<(HashMap<String, ConfiguredRole>, usize, usize)> {
         // We don't have FULL OUTER JOIN in sqlite, so, we improvise a bit.
         let active_rules_list = conn.query_cached(
             "SELECT rule_name, discord_role_id, last_updated \
              FROM guild_active_rules \
              WHERE discord_guild_id = ?1", guild
         ).get_all::<(String, RoleId, SystemTime)>()?;
-        let custom_roles_list = conn.query_cached(
+        let custom_rules_list = conn.query_cached(
             "SELECT rule_name, condition, last_updated \
              FROM guild_custom_rules \
              WHERE discord_guild_id = ?1", guild,
         ).get_all::<(String, String, SystemTime)>()?;
 
         let active_rules_count = active_rules_list.len();
+        let custom_rules_count = custom_rules_list.len();
+
         let mut map = HashMap::new();
         for (rule_name, role_id, last_updated) in active_rules_list {
             map.insert(rule_name, ConfiguredRole {
                 role_id: Some(role_id), custom_rule: None, last_updated,
             });
         }
-        for (rule_name, condition, last_updated) in custom_roles_list {
+        for (rule_name, condition, last_updated) in custom_rules_list {
             if let Some(role) = map.get_mut(&rule_name) {
                 role.custom_rule = Some(condition);
                 if role.last_updated < last_updated {
@@ -79,7 +81,7 @@ impl RoleManager {
                 });
             }
         }
-        Ok((map, active_rules_count))
+        Ok((map, active_rules_count, custom_rules_count))
     }
     pub fn get_configuration(&self, guild: GuildId) -> Result<HashMap<String, ConfiguredRole>> {
         Ok(self.get_configuration_internal(&self.database.connect()?, guild)?.0)
@@ -87,7 +89,8 @@ impl RoleManager {
     fn build_for_guild(
         &self, conn: &DatabaseConnection, guild: GuildId
     ) -> Result<VerificationSetStatus> {
-        let (configuration, active_count) = self.get_configuration_internal(conn, guild)?;
+        let (configuration, active_count, custom_count) =
+            self.get_configuration_internal(conn, guild)?;
 
         let limits_enabled = self.config.get(None, ConfigKeys::RolesEnableLimits)?;
         if limits_enabled {
@@ -99,6 +102,15 @@ impl RoleManager {
                     active_count, max_assigned
                 )))
             }
+
+            let max_custom = self.config.get(None, ConfigKeys::RolesMaxCustomRules)?;
+            if custom_count > max_custom as usize {
+                return Ok(VerificationSetStatus::Error(format!(
+                    "Too many custom roles exist. \
+                     ({} custom roles exist, maximum is {}.)",
+                    custom_count, max_custom
+                )))
+            }
         }
 
         let mut active_rule_names = Vec::new();
@@ -108,14 +120,7 @@ impl RoleManager {
             }
         }
 
-        let max_active_custom_rules = self.config.get(None, ConfigKeys::RolesMaxActiveCustomRules)?;
-        let mut active_custom_rules = 0;
         match VerificationSet::compile(&active_rule_names, |role| {
-            active_custom_rules += 1;
-            if limits_enabled && active_custom_rules > max_active_custom_rules {
-                cmd_error!("Too many custom rules are loaded. (Maximum is {}.)",
-                           active_custom_rules);
-            }
             configuration.get(role).and_then(|x| x.custom_rule.as_ref()).map_or(
                 Ok(None), |condition| VerificationRule::from_str(condition).map(Some))
         }) {
@@ -229,11 +234,28 @@ impl RoleManager {
         &self, guild: GuildId, rule_name: &str, condition: Option<&str>
     ) -> Result<()> {
         if let Some(condition) = condition {
+            let conn =  self.database.connect()?;
+
+            let limits_enabled = self.config.get(None, ConfigKeys::RolesEnableLimits)?;
+            if limits_enabled {
+                let max_custom = self.config.get(None, ConfigKeys::RolesMaxCustomRules)?;
+                let custom_count = conn.query_cached(
+                    "SELECT COUNT(*) FROM guild_custom_rules \
+                     WHERE discord_guild_id = ?1 AND rule_name != ?2",
+                    (guild, rule_name)
+                ).get::<u32>()?;
+                if custom_count + 1 > max_custom {
+                    cmd_error!("Too many custom rules exist. \
+                                (Including '{}', {} rules exist, maximum is {}.)",
+                               rule_name, custom_count + 1, max_custom);
+                }
+            }
+
             match VerificationRule::from_str(condition) {
                 Ok(_) => { }
                 Err(err) => cmd_error!("Failed to parse custom rule: {}", err),
             }
-            self.database.connect()?.execute_cached(
+            conn.execute_cached(
                 "REPLACE INTO guild_custom_rules (\
                     discord_guild_id, rule_name, condition, last_updated\
                 ) VALUES (?1, ?2, ?3, ?4)",
@@ -289,9 +311,9 @@ impl RoleManager {
         let member = guild.member(discord_id)?;
         let me_member = guild.member(serenity::CACHE.read().user.id)?;
         let can_access_user = util::can_member_access_member(&me_member, &member)?;
-        let do_set_username = self.config.get(Some(guild), ConfigKeys::SetUsername)?;
+        let do_set_nickname = self.config.get(None, ConfigKeys::SetNickname)?;
 
-        let set_username = if can_access_user && do_set_username {
+        let set_nickname = if can_access_user && do_set_nickname {
             let target_nickname = if let Some(roblox_id) = roblox_id {
                 Some(roblox_id.lookup_username()?)
             } else {
@@ -331,13 +353,13 @@ impl RoleManager {
             None
         };
 
-        trace!("Assigning username to {}: {:?}", member.distinct(), set_username);
+        trace!("Assigning nickname to {}: {:?}", member.distinct(), set_nickname);
         trace!("Assigning roles to {}: {:?}", member.distinct(), set_roles);
 
-        if set_username.is_some() || set_roles.is_some() {
+        if set_nickname.is_some() || set_roles.is_some() {
             member.edit(|mut edit| {
-                if let Some(username) = set_username {
-                    edit = edit.nickname(&username);
+                if let Some(nickname) = set_nickname {
+                    edit = edit.nickname(&nickname);
                 }
                 if let Some(roles) = set_roles {
                     edit = edit.roles(&roles)
@@ -345,14 +367,44 @@ impl RoleManager {
                 edit
             })?;
         }
-        Ok(if !can_access_user && do_set_username {
+        Ok(if !can_access_user && do_set_nickname {
             SetRolesStatus::IsAdmin
         } else {
             SetRolesStatus::Success
         })
     }
-    pub fn update_user(&self, guild: GuildId, discord_id: UserId,
-                       cooldown: Option<Duration>) -> Result<SetRolesStatus> {
+    pub fn update_user(&self, guild: GuildId, discord_id: UserId) -> Result<SetRolesStatus> {
         self.assign_roles(guild, discord_id, self.verifier.get_verified_roblox_user(discord_id)?)
+    }
+    pub fn update_user_with_cooldown(
+        &self, guild: GuildId, discord_id: UserId, cooldown: u64
+    ) -> Result<SetRolesStatus> {
+        // TODO: Cache cooldowns so this can be called per-message or something.
+
+        let conn = self.database.connect()?;
+        let last_updated = conn.query_cached(
+            "SELECT last_updated FROM roles_last_updated \
+             WHERE discord_guild_id = ?1 AND discord_user_id = ?2",
+            (guild, discord_id)
+        ).get_opt::<SystemTime>()?;
+        let now = SystemTime::now();
+        if let Some(last_updated) = last_updated {
+            let cooldown_ends = last_updated + Duration::from_secs(cooldown);
+            if now < cooldown_ends {
+                cmd_error!("You can only update your roles once every {}. Try again in {}.",
+                           util::to_english_time(cooldown),
+                           util::english_time_diff(now, cooldown_ends))
+            }
+        }
+        let result = self.update_user(guild, discord_id)?;
+        conn.execute_cached(
+            "INERT INTO roles_last_updated (discord_guild_id, discord_user_id, last_updated) \
+             VALUES (?1, ?2, ?3)", (guild, discord_id, now)
+        )?;
+        Ok(result)
+    }
+
+    pub fn clear_cache(&self) {
+        self.rule_cache.clear_cache()
     }
 }

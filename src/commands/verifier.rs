@@ -1,8 +1,10 @@
 use super::*;
 
 use chrono::{DateTime, Utc};
+use regex::Regex;
 use roblox::*;
 use serenity;
+use std::cmp::max;
 use std::time::SystemTime;
 use util;
 
@@ -114,8 +116,38 @@ fn check_configuration(ctx: &CommandContext, guild_id: GuildId) -> Result<()> {
     }
 }
 
-// TODO: Support roles by <@id> and id.
-// TODO: Enforce cooldowns on updating roles.
+fn find_role(guild_id: GuildId, role_name: &str) -> Result<RoleId> {
+    let guild = guild_id.find().chain_err(|| "Guild not found.")?;
+    let guild = guild.read();
+
+    lazy_static! {
+        static ref MATCH_ROLE: Regex = Regex::new("^<@([0-9]+)>$").unwrap();
+    }
+
+    if let Some(captures) = MATCH_ROLE.captures(role_name) {
+        let role_id_str = captures.get(1).chain_err(|| "No capture found.")?.as_str();
+        let role_id = RoleId(role_id_str.parse().to_cmd_err(|| "Role ID too large.")?);
+        cmd_ensure!(guild.roles.contains_key(&role_id),
+                    "That role does not exist in this server.");
+        Ok(role_id)
+    } else {
+        let mut found_role = None;
+        for (_, ref role) in &guild.roles {
+            if role.name.trim() == role_name {
+                cmd_ensure!(found_role.is_none(),
+                            "Two roles named '{}' found! Consider using `<@role id>` \
+                             to disambiguate.", role_name);
+                found_role = Some(role.id);
+            }
+        }
+        match found_role {
+            Some(role) => Ok(role),
+            None => cmd_error!("No role named '{}' found. Note that roles are case sensitive.",
+                               role_name),
+        }
+    }
+}
+
 pub const COMMANDS: &[Command] = &[
     Command::new("show_config")
         .help(None, "Shows the role configuration for the current channel.")
@@ -171,31 +203,14 @@ pub const COMMANDS: &[Command] = &[
             let me_member = guild_id.member(serenity::CACHE.read().user.id)?;
             let sender_member = guild_id.member(msg.author.id)?;
             if !role_name.is_empty() {
-                let mut found_role = None;
-                {
-                    let guild = guild_id.find().chain_err(|| "Guild not found.")?;
-                    let guild = guild.read();
-                    for (_, ref role) in &guild.roles {
-                        if role.name.trim() == role_name {
-                            cmd_ensure!(found_role.is_none(),
-                            "Two roles named '{}' found!", role_name);
-                            found_role = Some(role.id);
-                        }
-                    }
+                let role_id = find_role(guild_id, role_name)?;
+                if !util::can_member_access_role(&sender_member, role_id)? {
+                    cmd_error!("You do not have permission to modify that role.")
                 }
-                if let Some(role_id) = found_role {
-                    if !util::can_member_access_role(&sender_member, role_id)? {
-                        cmd_error!("You do not have permission to modify that role.")
-                    }
-                    if !util::can_member_access_role(&me_member, role_id)? {
-                        cmd_error!("This bot does not have permission to modify that role.")
-                    }
-
-                    ctx.core.roles().set_active_role(guild_id, rule_name, Some(role_id))?;
-                } else {
-                    cmd_error!("No role named '{}' found. Note that roles are case sensitive.",
-                               role_name)
+                if !util::can_member_access_role(&me_member, role_id)? {
+                    cmd_error!("This bot does not have permission to modify that role.")
                 }
+                ctx.core.roles().set_active_role(guild_id, rule_name, Some(role_id))?;
             } else {
                 ctx.core.roles().set_active_role(guild_id, rule_name, None)?;
             }
@@ -245,7 +260,11 @@ pub const COMMANDS: &[Command] = &[
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg| {
             let guild_id = msg.guild_id().chain_err(|| "Guild ID not found.")?;
-            ctx.core.roles().update_user(guild_id, msg.author.id, None)?;
+            let cooldown = max(
+                ctx.core.config().get(None, ConfigKeys::MinimumUpdateCooldownSeconds)?,
+                ctx.core.config().get(Some(guild_id), ConfigKeys::UpdateCooldownSeconds)?,
+            );
+            ctx.core.roles().update_user_with_cooldown(guild_id, msg.author.id, cooldown)?;
             ctx.respond("Your roles have been updated.")?;
             Ok(())
         }),
