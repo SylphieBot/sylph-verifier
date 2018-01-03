@@ -1,6 +1,7 @@
 use commands::*;
 use core::CommandSender;
 use core::config::*;
+use core::roles::*;
 use errors::*;
 use error_report;
 use parking_lot::{Mutex, RwLock};
@@ -8,13 +9,16 @@ use serenity::Client;
 use serenity::client::bridge::gateway::ShardManager;
 use serenity::model::prelude::*;
 use serenity::prelude::*;
+use std::borrow::Cow;
 use std::mem::drop;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;
 use util;
+use util::ConcurrentCache;
 
 // TODO: Implement SetOnJoin and UpdateOnMessage
+// TODO: Consider blocking a user from running multiple commands at once?
 
 struct DiscordContext<'a> {
     ctx: Context, message: &'a Message, content: &'a str, prefix: String,
@@ -62,40 +66,93 @@ struct DiscordBotData {
 
 struct Handler {
     config: ConfigManager, cmd_sender: CommandSender, user_prefix: RwLock<Option<String>>,
-    data: Arc<DiscordBotData>,
+    is_in_command: ConcurrentCache<UserId, Mutex<()>>, data: Arc<DiscordBotData>,
+    roles: RoleManager,
 }
 impl Handler {
+    fn context_str(message: &Message) -> Cow<str> {
+        if let Some(channel) = message.channel() {
+            match channel {
+                Channel::Guild(channel) => {
+                    let channel = channel.read();
+                    if let Some(guild) = channel.guild() {
+                        let guild = guild.read();
+                        format!("{} (guild #{})", guild.name, guild.id).into()
+                    } else {
+                        format!("channel #{} in unknown guild", channel.id).into()
+                    }
+                }
+                Channel::Group(group) =>
+                    format!("group #{}", group.read().channel_id).into(),
+                Channel::Private(_) =>
+                    "DM".into(),
+                Channel::Category(category) =>
+                    format!("category #{}", category.read().id).into(),
+            }
+        } else {
+            "unknown location".into()
+        }
+    }
     fn message_info(
-        message: &Message, channel: Channel
-    ) -> Result<(PrivilegeLevel, CommandTarget, String)> {
+        message: &Message, channel: Channel, bot_owner_id: Option<UserId>,
+    ) -> Result<(PrivilegeLevel, CommandTarget)> {
         Ok(match channel {
             Channel::Guild(channel) => {
-                // TODO: Implement BotOwner
                 let guild = channel.read().guild().chain_err(|| "Guild not found.")?;
                 let guild = guild.read();
-                let privilege = if message.author.id == guild.owner_id {
-                    PrivilegeLevel::GuildOwner
-                } else {
-                    PrivilegeLevel::NormalUser
-                };
-                (
-                    privilege, CommandTarget::ServerMessage,
-                    format!("{} (guild #{})", guild.name, guild.id)
-                )
+                let privilege =
+                    if Some(message.author.id) == bot_owner_id {
+                        PrivilegeLevel::BotOwner
+                    } else if message.author.id == guild.owner_id {
+                        PrivilegeLevel::GuildOwner
+                    } else {
+                        PrivilegeLevel::NormalUser
+                    };
+                (privilege, CommandTarget::ServerMessage)
             }
-            Channel::Group(group) => (
-                PrivilegeLevel::NormalUser, CommandTarget::PrivateMessage,
-                format!("group #{}", group.read().channel_id)
-            ),
-            Channel::Private(_) => (
-                PrivilegeLevel::NormalUser, CommandTarget::PrivateMessage,
-                "DM".to_owned()
-            ),
-            Channel::Category(category) => (
-                PrivilegeLevel::NormalUser, CommandTarget::PrivateMessage,
-                format!("category #{}", category.read().id)
-            ),
+            Channel::Group(_) | Channel::Private(_) =>
+                (PrivilegeLevel::NormalUser, CommandTarget::PrivateMessage),
+            Channel::Category(_) => bail!("Received message in category channel."),
         })
+    }
+
+    fn start_command_thread(
+        &self, ctx: Context, message: Message,
+        content: String, command: &'static Command, prefix: String,
+    ) -> Result<()> {
+        let command_no = util::command_id();
+        let head = format!("{} in {}", message.author.tag(), Self::context_str(&message));
+        debug!("Assigning ID #{} to command from {}: {:?}", command_no, head, message.content);
+
+        let cmd_sender = self.cmd_sender.clone();
+        let bot_owner_id = self.config.get(None, ConfigKeys::BotOwnerId)?.map(UserId);
+        let mutex = self.is_in_command.read(&message.author.id, || Ok(Mutex::new(())))?;
+        thread::Builder::new().name(format!("command #{}", command_no)).spawn(move || {
+            error_report::catch_error(move || {
+                if let Some(channel) = message.channel() {
+                    let (privilege_level, command_target) =
+                        Self::message_info(&message, channel, bot_owner_id)?;
+                    info!("{}: {}", head, message.content);
+                    let ctx = DiscordContext {
+                        ctx, message: &message, prefix, content: &content,
+                        privilege_level, command_target, command_no,
+                    };
+                    if let Some(lock) = mutex.try_lock() {
+                        cmd_sender.run_command(command, &ctx);
+                        drop(lock);
+                    } else {
+                        ctx.respond(&format!(
+                            "<@{}> You are already running a command. Please wait for it \
+                             to finish running, then try again.",
+                            message.author.id
+                        ))?;
+                    };
+                    debug!("Command #{} completed.", command_no);
+                }
+                Ok(())
+            }).ok();
+        })?;
+        Ok(())
     }
 }
 impl Drop for Handler {
@@ -132,44 +189,31 @@ impl EventHandler for Handler {
 
         if let Some(content) = content {
             if let Some(command) = get_command(&content) {
-                let command_no = util::command_id();
-                let cmd_sender = self.cmd_sender.clone();
-                error_report::catch_error(move || {
-                    thread::Builder::new().name(format!("command #{}", command_no)).spawn(move || {
-                        error_report::catch_error(move || {
-                            if let Some(channel) = message.channel() {
-                                let (privilege_level, command_target, context_str) =
-                                    Self::message_info(&message, channel)?;
-                                let head = format!("{} in {}", message.author.tag(), context_str);
-                                info!("{}: {}", head, message.content);
-                                debug!("Assigning ID #{} to commad from {}: \"{}\"",
-                                        command_no, head, message.content);
-                                let ctx = DiscordContext {
-                                    ctx, message: &message, prefix, content: &content,
-                                    privilege_level, command_target, command_no,
-                                };
-                                cmd_sender.run_command(command, &ctx)
-                            }
-                            Ok(())
-                        }).ok();
-                    })?;
-                    Ok(())
-                }).ok();
+                error_report::catch_error(||
+                    self.start_command_thread(ctx, message, content, command, prefix)
+                ).ok();
             }
         }
+    }
+
+    fn guild_member_addition(&self, _: Context, _: GuildId, _: Member) {
+
     }
 }
 
 struct DiscordBot {
     token: String, config: ConfigManager, cmd_sender: CommandSender, data: Arc<DiscordBotData>,
+    roles: RoleManager,
 }
 impl DiscordBot {
-    fn new(token: &str, config: ConfigManager, cmd_sender: CommandSender) -> Result<DiscordBot> {
+    fn new(
+        token: &str, config: ConfigManager, cmd_sender: CommandSender, roles: RoleManager,
+    ) -> Result<DiscordBot> {
         let data = Arc::new(DiscordBotData {
             shard_manager: Mutex::new(None), status: AtomicU8::new(STATUS_NOT_INIT),
         });
         Ok(DiscordBot {
-            config, cmd_sender, token: token.to_string(), data,
+            config, cmd_sender, token: token.to_string(), data, roles,
         })
     }
     fn start(&self) -> Result<()> {
@@ -179,7 +223,8 @@ impl DiscordBot {
         let data = self.data.clone();
         let mut client = Client::new(&self.token, Handler {
             config: self.config.clone(), cmd_sender: self.cmd_sender.clone(),
-            user_prefix: RwLock::new(None), data: data.clone(),
+            user_prefix: RwLock::new(None), is_in_command: ConcurrentCache::new(),
+            data: data.clone(), roles: self.roles.clone(),
         })?;
         thread::Builder::new().name("discord thread".to_string()).spawn(move || {
             error_report::catch_error(|| {
@@ -215,11 +260,13 @@ impl DiscordBot {
 
 pub struct DiscordManager {
     config: ConfigManager, cmd_sender: CommandSender, bot: Option<DiscordBot>,
-    shutdown: AtomicBool,
+    shutdown: AtomicBool, roles: RoleManager,
 }
 impl DiscordManager {
-    pub(in ::core) fn new(config: ConfigManager, cmd_sender: CommandSender) -> DiscordManager {
-        DiscordManager { config, cmd_sender, bot: None, shutdown: AtomicBool::new(false) }
+    pub(in ::core) fn new(
+        config: ConfigManager, cmd_sender: CommandSender, roles: RoleManager,
+    ) -> DiscordManager {
+        DiscordManager { config, cmd_sender, bot: None, shutdown: AtomicBool::new(false), roles }
     }
 
     fn check_bot_dead(&mut self) {
@@ -233,7 +280,8 @@ impl DiscordManager {
             match self.config.get(None, ConfigKeys::DiscordToken)? {
                 Some(token) => {
                     let bot = DiscordBot::new(&token,
-                                              self.config.clone(), self.cmd_sender.clone())?;
+                                              self.config.clone(), self.cmd_sender.clone(),
+                                              self.roles.clone())?;
                     bot.start()?;
                     self.bot = Some(bot);
                 }

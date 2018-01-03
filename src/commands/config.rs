@@ -126,6 +126,11 @@ config_values! {
         "The bot token used to connect to Discord.",
         |x|    Ok(Some(x.to_owned())),
         |_, x| Ok(x.map_or("(not set)", |_| "<token redacted>").to_owned()));
+    bot_owner_id<Option<u64>>(
+        BotOwnerId, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "The user ID of the bot's owner. That account can bypass permissions on any server.",
+        |x|    parse_u64(x).map(Some),
+        |_, x| Ok(x.map_or("(not set)".to_string(), |x| format!("{}", x)).to_owned()));
 
     roles_enable_limits<bool>(
         RolesEnableLimits, false, |_| Ok(GuildShowType::OnlyInTerminal),

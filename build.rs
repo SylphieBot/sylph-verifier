@@ -1,6 +1,8 @@
 extern crate git2;
+extern crate rustc_version;
 
 use std::env;
+use rustc_version::*;
 
 fn transfer_env(var: &str) {
     if let Ok(value) = env::var(var) {
@@ -25,5 +27,11 @@ fn main() {
         }
     } else {
         println!("cargo:rustc-env=GIT_COMMIT=unknown");
+    }
+
+    if let Ok(version) = version_meta() {
+        println!("cargo:rustc-env=RUSTC_VERSION_STR={}", version.short_version_string);
+    } else {
+        println!("cargo:rustc-env=RUSTC_VERSION_STR=unknown");
     }
 }

@@ -369,12 +369,12 @@ impl fmt::Display for VerificationRule {
         if !self.inputs.is_empty() {
             writeln!(f, "\t(inputs)")?;
             for input in &self.inputs {
-                writeln!(f, "\t{:?}", input)?;
+                writeln!(f, "\t\t{:?}", input)?;
             }
             writeln!(f)?;
+            writeln!(f, "\t(instructions)")?;
         }
-        writeln!(f, "\t(instructions)")?;
-        disasm(&self.ops, "\t", f)?;
+        disasm(&self.ops, if self.inputs.is_empty() { "\t" } else { "\t\t" }, f)?;
         writeln!(f, "}}")?;
         Ok(())
     }

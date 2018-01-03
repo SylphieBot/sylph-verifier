@@ -7,10 +7,11 @@ use serenity;
 use serenity::model::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::mem::drop;
+use std::sync::Arc;
 use std::time::{SystemTime, Duration};
 use roblox::{VerificationSet, VerificationRule, RobloxUserID};
 use util;
-use util::ConcurrentCache;
+use util::{AtomicSystemTime, ConcurrentCache};
 
 enum VerificationSetStatus {
     NotCompiled,
@@ -36,13 +37,19 @@ pub enum SetRolesStatus {
     Success, IsAdmin,
 }
 
-pub struct RoleManager {
+struct RoleManagerData {
     config: ConfigManager, database: Database, verifier: Verifier,
     rule_cache: ConcurrentCache<GuildId, RwLock<VerificationSetStatus>>,
+    last_update_cache: ConcurrentCache<(GuildId, UserId, bool), AtomicSystemTime>,
 }
+#[derive(Clone)]
+pub struct RoleManager(Arc<RoleManagerData>);
 impl RoleManager {
     pub fn new(config: ConfigManager, database: Database, verifier: Verifier) -> RoleManager {
-        RoleManager { config, database, verifier, rule_cache: ConcurrentCache::new() }
+        RoleManager(Arc::new(RoleManagerData {
+            config, database, verifier,
+            rule_cache: ConcurrentCache::new(), last_update_cache: ConcurrentCache::new(),
+        }))
     }
 
     fn get_configuration_internal(
@@ -84,7 +91,7 @@ impl RoleManager {
         Ok((map, active_rules_count, custom_rules_count))
     }
     pub fn get_configuration(&self, guild: GuildId) -> Result<HashMap<String, ConfiguredRole>> {
-        Ok(self.get_configuration_internal(&self.database.connect()?, guild)?.0)
+        Ok(self.get_configuration_internal(&self.0.database.connect()?, guild)?.0)
     }
     fn build_for_guild(
         &self, conn: &DatabaseConnection, guild: GuildId
@@ -92,9 +99,9 @@ impl RoleManager {
         let (configuration, active_count, custom_count) =
             self.get_configuration_internal(conn, guild)?;
 
-        let limits_enabled = self.config.get(None, ConfigKeys::RolesEnableLimits)?;
+        let limits_enabled = self.0.config.get(None, ConfigKeys::RolesEnableLimits)?;
         if limits_enabled {
-            let max_assigned = self.config.get(None, ConfigKeys::RolesMaxAssigned)?;
+            let max_assigned = self.0.config.get(None, ConfigKeys::RolesMaxAssigned)?;
             if active_count > max_assigned as usize {
                 return Ok(VerificationSetStatus::Error(format!(
                     "Too many roles are configured to be assigned. \
@@ -103,7 +110,7 @@ impl RoleManager {
                 )))
             }
 
-            let max_custom = self.config.get(None, ConfigKeys::RolesMaxCustomRules)?;
+            let max_custom = self.0.config.get(None, ConfigKeys::RolesMaxCustomRules)?;
             if custom_count > max_custom as usize {
                 return Ok(VerificationSetStatus::Error(format!(
                     "Too many custom roles exist. \
@@ -126,7 +133,8 @@ impl RoleManager {
         }) {
             Ok(set) => {
                 if limits_enabled {
-                    let max_instructions = self.config.get(None, ConfigKeys::RolesMaxInstructions)?;
+                    let max_instructions =
+                        self.0.config.get(None, ConfigKeys::RolesMaxInstructions)?;
                     if set.instruction_count() > max_instructions as usize {
                         return Ok(VerificationSetStatus::Error(format!(
                             "Role configuration is too complex. (Complexity is {}, maximum is {}.)",
@@ -134,7 +142,8 @@ impl RoleManager {
                     }
 
                     let web_requests = set.max_web_requests();
-                    let max_web_requests = self.config.get(None, ConfigKeys::RolesMaxWebRequests)?;
+                    let max_web_requests =
+                        self.0.config.get(None, ConfigKeys::RolesMaxWebRequests)?;
                     if web_requests > max_web_requests as usize {
                         return Ok(VerificationSetStatus::Error(format!(
                             "Role configuration makes to many web requests. \
@@ -159,17 +168,16 @@ impl RoleManager {
         }
     }
 
-    fn with_cached<F, R>(
-        &self, guild: GuildId, f: F
-    ) -> Result<R> where F: FnOnce(&RwLock<VerificationSetStatus>) -> Result<R> {
-        self.rule_cache.get_cached(&guild,
-                                   || Ok(RwLock::new(VerificationSetStatus::NotCompiled)), f)
+    fn get_rule_cache(
+        &self, guild: GuildId
+    ) -> Result<Arc<RwLock<VerificationSetStatus>>> {
+        self.0.rule_cache.read(&guild, || Ok(RwLock::new(VerificationSetStatus::NotCompiled)))
     }
     fn update_cached_verification(
         &self, lock: &RwLock<VerificationSetStatus>, guild: GuildId, force: bool,
     ) -> Result<()> {
         if force || !lock.read().is_compiled() {
-            let status = self.build_for_guild(&self.database.connect()?, guild)?;
+            let status = self.build_for_guild(&self.0.database.connect()?, guild)?;
             let mut write = lock.write();
             if force || !write.is_compiled() {
                 *write = status;
@@ -179,12 +187,13 @@ impl RoleManager {
     }
 
     fn refresh_cache(&self, guild: GuildId) -> Result<()> {
-        self.with_cached(guild, |lock| self.update_cached_verification(lock, guild, true))
+        let cache = self.get_rule_cache(guild)?;
+        self.update_cached_verification(&cache, guild, true)
     }
     pub fn set_active_role(
         &self, guild: GuildId, rule_name: &str, discord_role: Option<RoleId>
     ) -> Result<()> {
-        let conn = self.database.connect()?;
+        let conn = self.0.database.connect()?;
         conn.transaction_immediate(|| {
             let role_exists = VerificationRule::has_builtin(rule_name) || conn.query_cached(
                 "SELECT COUNT(*) FROM guild_custom_rules \
@@ -195,9 +204,9 @@ impl RoleManager {
                 cmd_error!("No rule name '{}' found.", rule_name);
             }
 
-            let limits_enabled = self.config.get(None, ConfigKeys::RolesEnableLimits)?;
+            let limits_enabled = self.0.config.get(None, ConfigKeys::RolesEnableLimits)?;
             if limits_enabled {
-                let max_assigned = self.config.get(None, ConfigKeys::RolesMaxAssigned)?;
+                let max_assigned = self.0.config.get(None, ConfigKeys::RolesMaxAssigned)?;
                 let assigned_count = conn.query_cached(
                     "SELECT COUNT(*) FROM guild_active_rules \
                      WHERE discord_guild_id = ?1 AND rule_name != ?2",
@@ -234,11 +243,11 @@ impl RoleManager {
         &self, guild: GuildId, rule_name: &str, condition: Option<&str>
     ) -> Result<()> {
         if let Some(condition) = condition {
-            let conn =  self.database.connect()?;
+            let conn =  self.0.database.connect()?;
 
-            let limits_enabled = self.config.get(None, ConfigKeys::RolesEnableLimits)?;
+            let limits_enabled = self.0.config.get(None, ConfigKeys::RolesEnableLimits)?;
             if limits_enabled {
-                let max_custom = self.config.get(None, ConfigKeys::RolesMaxCustomRules)?;
+                let max_custom = self.0.config.get(None, ConfigKeys::RolesMaxCustomRules)?;
                 let custom_count = conn.query_cached(
                     "SELECT COUNT(*) FROM guild_custom_rules \
                      WHERE discord_guild_id = ?1 AND rule_name != ?2",
@@ -262,7 +271,7 @@ impl RoleManager {
                 (guild, rule_name, condition, SystemTime::now())
             )?;
         } else {
-            self.database.connect()?.execute_cached(
+            self.0.database.connect()?.execute_cached(
                 "DELETE FROM guild_custom_rules \
                  WHERE discord_guild_id = ?1 AND rule_name = ?2",
                 (guild, rule_name)
@@ -272,36 +281,36 @@ impl RoleManager {
         Ok(())
     }
     pub fn check_error(&self, guild: GuildId) -> Result<Option<String>> {
-        self.with_cached(guild, |lock| {
-            self.update_cached_verification(lock, guild, false)?;
-            Ok(match *lock.read() {
-                VerificationSetStatus::Error(ref str) => Some(str.clone()),
-                _ => None,
-            })
+        let lock = self.get_rule_cache(guild)?;
+        self.update_cached_verification(&lock, guild, false)?;
+        let read = lock.read();
+        Ok(match *read {
+            VerificationSetStatus::Error(ref str) => Some(str.clone()),
+            _ => None,
         })
     }
 
     pub fn get_assigned_roles(
         &self, guild: GuildId, roblox_id: RobloxUserID
     ) -> Result<Vec<AssignedRole>> {
-        self.with_cached(guild, |lock| {
-            self.update_cached_verification(lock, guild, false)?;
-            Ok(match *lock.read() {
-                VerificationSetStatus::Compiled(ref rule_set, ref role_info) => {
-                    let mut vec = Vec::new();
-                    for (rule_name, is_assigned) in rule_set.verify(roblox_id)? {
-                        let discord_role_id = role_info[rule_name];
-                        vec.push(AssignedRole {
-                            rule: rule_name.to_string(), role_id: discord_role_id, is_assigned,
-                        })
-                    }
-                    vec
+        let lock = self.get_rule_cache(guild)?;
+        self.update_cached_verification(&lock, guild, false)?;
+        let read = lock.read();
+        Ok(match *read {
+            VerificationSetStatus::Compiled(ref rule_set, ref role_info) => {
+                let mut vec = Vec::new();
+                for (rule_name, is_assigned) in rule_set.verify(roblox_id)? {
+                    let discord_role_id = role_info[rule_name];
+                    vec.push(AssignedRole {
+                        rule: rule_name.to_string(), role_id: discord_role_id, is_assigned,
+                    })
                 }
-                VerificationSetStatus::Error(_) =>
-                    cmd_error!("There is a problem with this server's role configuration. \
-                                Please contact the server admins."),
-                VerificationSetStatus::NotCompiled => unreachable!(),
-            })
+                vec
+            }
+            VerificationSetStatus::Error(_) =>
+                cmd_error!("There is a problem with this server's role configuration. \
+                            Please contact the server admins."),
+            VerificationSetStatus::NotCompiled => unreachable!(),
         })
     }
 
@@ -311,7 +320,7 @@ impl RoleManager {
         let member = guild.member(discord_id)?;
         let me_member = guild.member(serenity::CACHE.read().user.id)?;
         let can_access_user = util::can_member_access_member(&me_member, &member)?;
-        let do_set_nickname = self.config.get(None, ConfigKeys::SetNickname)?;
+        let do_set_nickname = self.0.config.get(None, ConfigKeys::SetNickname)?;
 
         let set_nickname = if can_access_user && do_set_nickname {
             let target_nickname = if let Some(roblox_id) = roblox_id {
@@ -373,20 +382,28 @@ impl RoleManager {
             SetRolesStatus::Success
         })
     }
+
     pub fn update_user(&self, guild: GuildId, discord_id: UserId) -> Result<SetRolesStatus> {
-        self.assign_roles(guild, discord_id, self.verifier.get_verified_roblox_user(discord_id)?)
+        self.assign_roles(guild, discord_id, self.0.verifier.get_verified_roblox_user(discord_id)?)
+    }
+
+    fn with_cooldown_cache(
+        &self, guild_id: GuildId, user_id: UserId, is_manual: bool
+    ) -> Result<Arc<AtomicSystemTime>> {
+        self.0.last_update_cache.read(&(guild_id, user_id, is_manual), || {
+            let time = self.0.database.connect()?.query_cached(
+                "SELECT last_updated FROM roles_last_updated \
+                 WHERE discord_guild_id = ?1 AND discord_user_id = ?2 AND is_manual = ?3",
+                (guild_id, user_id, is_manual)
+            ).get_opt::<SystemTime>()?;
+            Ok(AtomicSystemTime::new(time))
+        })
     }
     pub fn update_user_with_cooldown(
-        &self, guild: GuildId, discord_id: UserId, cooldown: u64
+        &self, guild_id: GuildId, user_id: UserId, cooldown: u64, is_manual: bool,
     ) -> Result<SetRolesStatus> {
-        // TODO: Cache cooldowns so this can be called per-message or something.
-
-        let conn = self.database.connect()?;
-        let last_updated = conn.query_cached(
-            "SELECT last_updated FROM roles_last_updated \
-             WHERE discord_guild_id = ?1 AND discord_user_id = ?2",
-            (guild, discord_id)
-        ).get_opt::<SystemTime>()?;
+        let cache = self.with_cooldown_cache(guild_id, user_id, is_manual)?;
+        let last_updated = cache.load();
         let now = SystemTime::now();
         if let Some(last_updated) = last_updated {
             let cooldown_ends = last_updated + Duration::from_secs(cooldown);
@@ -396,15 +413,28 @@ impl RoleManager {
                            util::english_time_diff(now, cooldown_ends))
             }
         }
-        let result = self.update_user(guild, discord_id)?;
-        conn.execute_cached(
-            "INERT INTO roles_last_updated (discord_guild_id, discord_user_id, last_updated) \
-             VALUES (?1, ?2, ?3)", (guild, discord_id, now)
+        let result = self.update_user(guild_id, user_id)?;
+        self.0.database.connect()?.execute_cached(
+            "INSERT INTO roles_last_updated (\
+                discord_guild_id, discord_user_id, is_manual, last_updated\
+            ) VALUES (?1, ?2, ?3, ?4)", (guild_id, user_id, is_manual, now),
         )?;
+        cache.store(Some(now));
         Ok(result)
     }
 
-    pub fn clear_cache(&self) {
-        self.rule_cache.clear_cache()
+    pub fn explain_rule_set(&self, guild: GuildId) -> Result<String> {
+        let lock = self.get_rule_cache(guild)?;
+        self.update_cached_verification(&lock, guild, false)?;
+        let read = lock.read();
+        match *read {
+            VerificationSetStatus::Compiled(ref set, _) => Ok(format!("{}", set)),
+            VerificationSetStatus::Error(ref err) => Ok(format!("Could not compile: {}", err)),
+            VerificationSetStatus::NotCompiled => unimplemented!(),
+        }
+    }
+
+    pub fn clear_rule_cache(&self) {
+        self.0.rule_cache.clear_cache()
     }
 }

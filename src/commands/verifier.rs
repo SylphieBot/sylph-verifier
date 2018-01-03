@@ -148,6 +148,15 @@ fn find_role(guild_id: GuildId, role_name: &str) -> Result<RoleId> {
     }
 }
 
+fn maybe_sprunge(ctx: &CommandContext, text: &str) -> Result<()> {
+    if text.chars().count() < 1900 {
+        ctx.respond(format!("```\n{}\n```", text))
+    } else {
+        ctx.respond(format!("The response is too long and has been uploaded to a site: {}",
+                            util::sprunge(text)?))
+    }
+}
+
 pub const COMMANDS: &[Command] = &[
     Command::new("show_config")
         .help(None, "Shows the role configuration for the current channel.")
@@ -204,11 +213,13 @@ pub const COMMANDS: &[Command] = &[
             let sender_member = guild_id.member(msg.author.id)?;
             if !role_name.is_empty() {
                 let role_id = find_role(guild_id, role_name)?;
-                if !util::can_member_access_role(&sender_member, role_id)? {
-                    cmd_error!("You do not have permission to modify that role.")
-                }
-                if !util::can_member_access_role(&me_member, role_id)? {
-                    cmd_error!("This bot does not have permission to modify that role.")
+                if ctx.privilege_level < PrivilegeLevel::BotOwner {
+                    if !util::can_member_access_role(&sender_member, role_id)? {
+                        cmd_error!("You do not have permission to modify that role.")
+                    }
+                    if !util::can_member_access_role(&me_member, role_id)? {
+                        cmd_error!("This bot does not have permission to modify that role.")
+                    }
                 }
                 ctx.core.roles().set_active_role(guild_id, rule_name, Some(role_id))?;
             } else {
@@ -259,12 +270,13 @@ pub const COMMANDS: &[Command] = &[
         .help(None, "Updates your roles according to your Roblox account.")
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg| {
+            // TODO: Check if the user is actually verified.
             let guild_id = msg.guild_id().chain_err(|| "Guild ID not found.")?;
             let cooldown = max(
                 ctx.core.config().get(None, ConfigKeys::MinimumUpdateCooldownSeconds)?,
                 ctx.core.config().get(Some(guild_id), ConfigKeys::UpdateCooldownSeconds)?,
             );
-            ctx.core.roles().update_user_with_cooldown(guild_id, msg.author.id, cooldown)?;
+            ctx.core.roles().update_user_with_cooldown(guild_id, msg.author.id, cooldown, true)?;
             ctx.respond("Your roles have been updated.")?;
             Ok(())
         }),
@@ -273,4 +285,18 @@ pub const COMMANDS: &[Command] = &[
               "Verifies a Roblox account to your Discord account.")
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(do_verify),
+    Command::new("explain")
+        .help(Some("[rule to explain]"),
+              "Explains the compilation of your ruleset or a role. You probably don't need this.")
+        .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
+        .exec_discord(|ctx, _, msg| {
+            let rule = ctx.rest(0)?;
+            if rule == "" {
+                let guild_id = msg.guild_id().chain_err(|| "Guild ID not found.")?;
+                maybe_sprunge(ctx, &ctx.core.roles().explain_rule_set(guild_id)?)
+            } else {
+                let rule = format!("{}", VerificationRule::from_str(rule)?);
+                maybe_sprunge(ctx, &rule)
+            }
+        }),
 ];

@@ -86,9 +86,10 @@ impl VerifierCore {
 
         let terminal = Terminal::new(cmd_sender.clone())?;
         let verifier = Verifier::new(config.clone(), database.clone())?;
-        let discord = Mutex::new(DiscordManager::new(config.clone(), cmd_sender.clone()));
         let place = PlaceManager::new(place_target)?;
         let roles = RoleManager::new(config.clone(), database.clone(), verifier.clone());
+        let discord =
+            Mutex::new(DiscordManager::new(config.clone(), cmd_sender.clone(), roles.clone()));
 
         Ok(VerifierCore(Arc::new(VerifierCoreData {
             status: AtomicU8::new(STATUS_STOPPED),

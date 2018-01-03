@@ -205,13 +205,14 @@ config_keys! {
     // Discord settings
     CommandPrefix<String>("!".to_owned());
     DiscordToken<Option<String>>(None, |core| core.reconnect_discord());
+    BotOwnerId<Option<u64>>(None);
 
     // Limits for verification rules
-    RolesEnableLimits<bool>(false, |core| Ok(core.roles().clear_cache()));
-    RolesMaxAssigned<u32>(15, |core| Ok(core.roles().clear_cache()));
-    RolesMaxCustomRules<u32>(30, |core| Ok(core.roles().clear_cache()));
-    RolesMaxInstructions<u32>(500, |core| Ok(core.roles().clear_cache()));
-    RolesMaxWebRequests<u32>(10, |core| Ok(core.roles().clear_cache()));
+    RolesEnableLimits<bool>(false, |core| Ok(core.roles().clear_rule_cache()));
+    RolesMaxAssigned<u32>(15, |core| Ok(core.roles().clear_rule_cache()));
+    RolesMaxCustomRules<u32>(30, |core| Ok(core.roles().clear_rule_cache()));
+    RolesMaxInstructions<u32>(500, |core| Ok(core.roles().clear_rule_cache()));
+    RolesMaxWebRequests<u32>(10, |core| Ok(core.roles().clear_rule_cache()));
 
     // Role management settings
     SetNickname<bool>(true);
@@ -252,7 +253,8 @@ config_keys! {
 
 struct ConfigManagerData {
     database: Database,
-    global_cache: ConfigCache, guild_cache: ConcurrentCache<GuildId, ConfigCache>,
+    global_cache: Arc<ConfigCache>,
+    guild_cache: ConcurrentCache<GuildId, ConfigCache>,
 }
 
 #[derive(Clone)]
@@ -261,39 +263,33 @@ impl ConfigManager {
     pub fn new(database: Database) -> ConfigManager {
         trace!("ConfigCache size: {}", mem::size_of::<ConfigCache>());
         ConfigManager(Arc::new(ConfigManagerData {
-            database, global_cache: ConfigCache::new(), guild_cache: ConcurrentCache::new(),
+            database,
+            global_cache: Arc::new(ConfigCache::new()),
+            guild_cache: ConcurrentCache::new(),
         }))
     }
 
-    fn get_cache<T, F>(
-        &self, guild: Option<GuildId>, f: F
-    ) -> Result<T> where F: FnOnce(&ConfigCache) -> Result<T> {
+    fn get_cache(&self, guild: Option<GuildId>) -> Result<Arc<ConfigCache>> {
         match guild {
-            Some(guild) => self.0.guild_cache.get_cached(&guild, || Ok(ConfigCache::new()), f),
-            None => f(&self.0.global_cache),
+            Some(guild) => self.0.guild_cache.read(&guild, || Ok(ConfigCache::new())),
+            None => Ok(self.0.global_cache.clone()),
         }
     }
-
     pub fn set<T : ToSql + Clone + Any + Send + Sync>(
         &self, core: &VerifierCore, guild: Option<GuildId>, key: ConfigKey<T>, val: T,
     ) -> Result<()> {
-        self.get_cache(guild, |cache| {
-            cache.set(core, &self.0.database.connect()?, guild, key, val)
-        })
+        self.get_cache(guild)?.set(core, &self.0.database.connect()?, guild, key, val)
     }
     pub fn reset<T: Clone + Any + Send + Sync>(
         &self, core: &VerifierCore, guild: Option<GuildId>, key: ConfigKey<T>
     ) -> Result<()> {
-        self.get_cache(guild, |cache| {
-            cache.reset(core, &self.0.database.connect()?, guild, key.enum_name)
-        })
+        self.get_cache(guild)?.reset(core, &self.0.database.connect()?, guild, key.enum_name)
     }
 
     fn get_internal<T : ToSql + FromSql + Clone + Any + Send + Sync>(
         &self, conn: &DatabaseConnection, guild: Option<GuildId>, key: ConfigKey<T>
     ) -> Result<T> {
-        let result =
-            self.get_cache(guild, |cache| cache.get(&self.0.database.connect()?, guild, key))?;
+        let result = self.get_cache(guild)?.get(&self.0.database.connect()?, guild, key)?;
         if guild.is_some() {
             match result {
                 Some(res) => Ok(res),

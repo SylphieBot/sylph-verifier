@@ -3,9 +3,11 @@ use errors::*;
 use linefeed::reader::LogSender;
 use log::*;
 use parking_lot::Mutex;
+use std::collections::VecDeque;
 use std::fs;
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::fmt::{Write as FmtWrite};
+use std::io::{BufWriter, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -121,6 +123,40 @@ impl LogFileOutput {
 }
 static LOG_FILE: Mutex<LogFileOutput> = Mutex::new(LogFileOutput::NotInitialized);
 
+const STORE_LOG_LINES: usize = 40;
+enum ErrorLogBuf {
+    NotInitialized,
+    Initialized(VecDeque<String>),
+}
+impl ErrorLogBuf {
+    fn push_log(&mut self, line: String) {
+        if let &mut ErrorLogBuf::NotInitialized = self {
+            *self = ErrorLogBuf::Initialized(VecDeque::new());
+        }
+        if let &mut ErrorLogBuf::Initialized(ref mut vec) = self {
+            vec.push_back(line);
+            if vec.len() > STORE_LOG_LINES {
+                vec.pop_front();
+            }
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn format_logs(&self) -> Result<String> {
+        if let &ErrorLogBuf::Initialized(ref vec) = self {
+            let mut buffer = String::new();
+            for line in vec {
+                writeln!(buffer, "{}", line)?;
+            }
+            Ok(buffer)
+        } else {
+            Ok("no logs found".to_owned())
+        }
+    }
+}
+static ERROR_LOG_BUF: Mutex<ErrorLogBuf> = Mutex::new(ErrorLogBuf::NotInitialized);
+
 struct Logger {
     log_dir: PathBuf,
 }
@@ -165,6 +201,7 @@ impl Log for Logger {
                     log_raw(&format!("[{}] [{}/WARN] Failed to log line to disk!",
                                      now, munge_target(module_path!())))
                 }
+                ERROR_LOG_BUF.lock().push_log(line);
             }
         }
     }
@@ -172,6 +209,10 @@ impl Log for Logger {
     fn flush(&self) {
         // Not used
     }
+}
+
+pub fn format_recent_logs() -> Result<String> {
+    ERROR_LOG_BUF.lock().format_logs()
 }
 
 pub fn init<P: AsRef<Path>>(root_path: P) -> Result<()> {

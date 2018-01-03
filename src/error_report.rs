@@ -18,9 +18,30 @@ use std::process::abort;
 use std::thread;
 use std::time::Duration;
 
-fn make_error_report(kind: &str, cause: &str, backtrace: &str) -> Result<String> {
+#[derive(Copy, Clone)]
+enum ReportType {
+    Error, Panic, Deadlock,
+}
+impl ReportType {
+    fn name(self) -> &'static str {
+        match self {
+            ReportType::Error    => "Error",
+            ReportType::Panic    => "Panic",
+            ReportType::Deadlock => "Deadlock",
+        }
+    }
+    fn lc_name(self) -> &'static str {
+        match self {
+            ReportType::Error    => "error",
+            ReportType::Panic    => "panic",
+            ReportType::Deadlock => "deadlock",
+        }
+    }
+}
+
+fn make_error_report(kind: ReportType, cause: &str, backtrace: &str) -> Result<String> {
     let mut buf = String::new();
-    writeln!(buf, "--- Sylph-Verifier {} Report ---", kind)?;
+    writeln!(buf, "--- Sylph-Verifier {} Report ---", kind.name())?;
     writeln!(buf)?;
     writeln!(buf, "Version: {} {} ({}{}{})",
                   env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"), env!("TARGET"),
@@ -30,6 +51,7 @@ fn make_error_report(kind: &str, cause: &str, backtrace: &str) -> Result<String>
                   if env!("PROFILE") != "release" {
                       format!(", {}", env!("PROFILE"))
                   } else { "".to_owned() })?;
+    writeln!(buf, "Compiler: {}", env!("RUSTC_VERSION_STR"))?;
     writeln!(buf, "Commit: {}{}",
                   env!("GIT_COMMIT"),
                   if option_env!("GIT_IS_DIRTY").is_some() { " (dirty)" } else { "" })?;
@@ -37,6 +59,9 @@ fn make_error_report(kind: &str, cause: &str, backtrace: &str) -> Result<String>
     writeln!(buf, "{}", cause.trim())?;
     writeln!(buf)?;
     writeln!(buf, "{}", backtrace.trim())?;
+    writeln!(buf)?;
+    writeln!(buf, "(recent logs)")?;
+    writeln!(buf, "{}", logger::format_recent_logs()?)?;
     Ok(buf)
 }
 
@@ -55,17 +80,19 @@ fn write_report_file<P: AsRef<Path>>(root_path: P, kind: &str, report: &str) -> 
 }
 
 static ROOT_PATH: RwLock<Option<PathBuf>> = RwLock::new(None);
-fn write_report(kind: &str, cause: &str, backtrace: &str) -> Result<()> {
+fn write_report(kind: ReportType, cause: &str, backtrace: &str) -> Result<()> {
     if let Some(line) = cause.trim().split('\n').next() {
         error!("{}", line);
     }
 
-    let lc_kind = kind.to_lowercase();
     let root_path = ROOT_PATH.read().as_ref().unwrap().clone();
-    let report_file = write_report_file(root_path, &lc_kind,
+    let report_file = write_report_file(root_path, kind.lc_name(),
                                         &make_error_report(kind, cause, backtrace)?)?;
     error!("Detailed information about this {} can be found at '{}'.",
-           lc_kind, report_file.display());
+           kind.lc_name(), report_file.display());
+    error!("This is probably a bug. Please report it at \
+            https://github.com/Lymia/sylph-verifier/issues and include the {} report.",
+           kind.lc_name());
     Ok(())
 }
 
@@ -110,7 +137,7 @@ fn check_report_deadlock() -> Result<bool> {
 
         logger::lock_log_sender();
         println!();
-        write_report("Deadlock", &cause, &backtrace)?;
+        write_report(ReportType::Deadlock, &cause, &backtrace)?;
 
         Ok(true)
     } else {
@@ -132,7 +159,7 @@ fn report_err<E: ChainedError>(e: &E) -> Result<()> {
         Some(bt) => format!("{:?}", bt),
         None => format!("(from catch site)\n{:?}", Backtrace::new()),
     };
-    write_report("Error", &cause, &backtrace)?;
+    write_report(ReportType::Error, &cause, &backtrace)?;
     Ok(())
 }
 fn cause_from_panic(info: &(Any + Send), loc: Option<&Location>) -> String {
@@ -154,7 +181,7 @@ pub fn init<P: AsRef<Path>>(root_path: P) {
     set_hook(Box::new(|panic_info| {
         let cause = cause_from_panic(panic_info.payload(), panic_info.location());
         let backtrace = format!("{:?}", Backtrace::new());
-        write_report("Panic", &cause, &backtrace).expect("failed to write panic report!");
+        write_report(ReportType::Panic, &cause, &backtrace).expect("failed to write panic report!");
     }));
 
     thread::Builder::new().name("deadlock detection thread".to_owned()).spawn(|| {

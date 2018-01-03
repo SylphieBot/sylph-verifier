@@ -10,6 +10,8 @@ use std::io;
 use std::thread;
 use util;
 
+// TODO: Exclude sensitive commands from logging somehow?
+
 struct TerminalContext {
     line: String, command_no: usize,
 }

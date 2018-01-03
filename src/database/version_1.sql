@@ -51,6 +51,6 @@ CREATE TABLE guild_active_rules (
 
 -- Stores the last time Discord roles were updated for a Discord user.
 CREATE TABLE roles_last_updated (
-  discord_guild_id BIGINT, discord_user_id BIGINT, last_updated TIMESTAMP NOT NULL,
-  PRIMARY KEY (discord_guild_id, discord_user_id)
+  discord_guild_id BIGINT, discord_user_id BIGINT, is_manual BOOL, last_updated TIMESTAMP NOT NULL,
+  PRIMARY KEY (discord_guild_id, discord_user_id, is_manual)
 ) WITHOUT ROWID;
