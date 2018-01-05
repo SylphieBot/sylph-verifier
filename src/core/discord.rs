@@ -1,7 +1,8 @@
 use commands::*;
-use core::CommandSender;
+use core::CoreRef;
 use core::config::*;
 use core::roles::*;
+use core::tasks::*;
 use errors::*;
 use error_report;
 use parking_lot::{Mutex, RwLock};
@@ -56,18 +57,18 @@ impl <'a> CommandContextData for DiscordContext<'a> {
 }
 
 const STATUS_NOT_INIT: u8 = 0;
-const STATUS_RUNNING : u8 = 1;
-const STATUS_SHUTDOWN: u8 = 2;
-const STATUS_DROPPED : u8 = 3;
+const STATUS_STARTING: u8 = 1;
+const STATUS_RUNNING : u8 = 2;
+const STATUS_SHUTDOWN: u8 = 3;
+const STATUS_DROPPED : u8 = 4;
 
-struct DiscordBotData {
-    shard_manager: Mutex<Option<Arc<Mutex<ShardManager>>>>, status: AtomicU8,
+struct DiscordBotSharedData {
+    config: ConfigManager, core_ref: CoreRef, roles: RoleManager, tasks: TaskManager,
 }
 
 struct Handler {
-    config: ConfigManager, cmd_sender: CommandSender, user_prefix: RwLock<Option<String>>,
-    is_in_command: ConcurrentCache<UserId, Mutex<()>>, data: Arc<DiscordBotData>,
-    roles: RoleManager,
+    user_prefix: RwLock<Option<String>>, is_in_command: ConcurrentCache<UserId, Mutex<()>>,
+    shared: Arc<DiscordBotSharedData>, status: Arc<AtomicU8>,
 }
 impl Handler {
     fn context_str(message: &Message) -> Cow<str> {
@@ -124,8 +125,8 @@ impl Handler {
         let head = format!("{} in {}", message.author.tag(), Self::context_str(&message));
         debug!("Assigning ID #{} to command from {}: {:?}", command_no, head, message.content);
 
-        let cmd_sender = self.cmd_sender.clone();
-        let bot_owner_id = self.config.get(None, ConfigKeys::BotOwnerId)?.map(UserId);
+        let core_ref = self.shared.core_ref.clone();
+        let bot_owner_id = self.shared.config.get(None, ConfigKeys::BotOwnerId)?.map(UserId);
         let mutex = self.is_in_command.read(&message.author.id, || Ok(Mutex::new(())))?;
         thread::Builder::new().name(format!("command #{}", command_no)).spawn(move || {
             error_report::catch_error(move || {
@@ -138,7 +139,7 @@ impl Handler {
                         privilege_level, command_target, command_no,
                     };
                     if let Some(lock) = mutex.try_lock() {
-                        cmd_sender.run_command(command, &ctx);
+                        core_ref.run_command(command, &ctx);
                         drop(lock);
                     } else {
                         ctx.respond(&format!(
@@ -158,7 +159,7 @@ impl Handler {
 impl Drop for Handler {
     fn drop(&mut self) {
         info!("Discord event handler shut down.");
-        self.data.status.compare_and_swap(STATUS_SHUTDOWN, STATUS_DROPPED, Ordering::Relaxed);
+        self.status.compare_and_swap(STATUS_SHUTDOWN, STATUS_DROPPED, Ordering::Relaxed);
     }
 }
 impl EventHandler for Handler {
@@ -168,7 +169,7 @@ impl EventHandler for Handler {
 
     fn message(&self, ctx: Context, message: Message) {
         let prefix = error_report::catch_error(||
-            self.config.get(None, ConfigKeys::CommandPrefix)
+            self.shared.config.get(None, ConfigKeys::CommandPrefix)
         );
         let prefix = match prefix {
             Ok(prefix) => prefix,
@@ -202,34 +203,30 @@ impl EventHandler for Handler {
 }
 
 struct DiscordBot {
-    token: String, config: ConfigManager, cmd_sender: CommandSender, data: Arc<DiscordBotData>,
-    roles: RoleManager,
+    token: String, status: Arc<AtomicU8>, shared: Arc<DiscordBotSharedData>,
+    shard_manager: Mutex<Option<Arc<Mutex<ShardManager>>>>,
 }
 impl DiscordBot {
-    fn new(
-        token: &str, config: ConfigManager, cmd_sender: CommandSender, roles: RoleManager,
-    ) -> Result<DiscordBot> {
-        let data = Arc::new(DiscordBotData {
-            shard_manager: Mutex::new(None), status: AtomicU8::new(STATUS_NOT_INIT),
-        });
+    fn new(token: &str, shared: Arc<DiscordBotSharedData>) -> Result<DiscordBot> {
         Ok(DiscordBot {
-            config, cmd_sender, token: token.to_string(), data, roles,
+            token: token.to_string(), status: Arc::new(AtomicU8::new(STATUS_NOT_INIT)),
+            shard_manager: Mutex::new(None), shared,
         })
     }
     fn start(&self) -> Result<()> {
-        ensure!(self.data.status.compare_and_swap(STATUS_NOT_INIT, STATUS_RUNNING,
-                                                  Ordering::Relaxed) == STATUS_NOT_INIT,
+        ensure!(self.status.compare_and_swap(STATUS_NOT_INIT, STATUS_STARTING,
+                                             Ordering::Relaxed) == STATUS_NOT_INIT,
                 "Discord component already started!");
-        let data = self.data.clone();
         let mut client = Client::new(&self.token, Handler {
-            config: self.config.clone(), cmd_sender: self.cmd_sender.clone(),
             user_prefix: RwLock::new(None), is_in_command: ConcurrentCache::new(),
-            data: data.clone(), roles: self.roles.clone(),
+            shared: self.shared.clone(), status: self.status.clone(),
         })?;
+        *self.shard_manager.lock() = Some(client.shard_manager.clone());
+        ensure!(self.status.compare_and_swap(STATUS_STARTING, STATUS_RUNNING,
+                                             Ordering::Relaxed) == STATUS_STARTING,
+                "Internal error: DiscordBot not in STATUS_STARTING!");
         thread::Builder::new().name("discord thread".to_string()).spawn(move || {
             error_report::catch_error(|| {
-                *data.shard_manager.lock() = Some(client.shard_manager.clone());
-                drop(data);
                 match client.start_autosharded() {
                     Ok(_) | Err(SerenityError::Client(ClientError::Shutdown)) => Ok(()),
                     Err(err) => bail!(err),
@@ -239,12 +236,13 @@ impl DiscordBot {
         Ok(())
     }
     fn shutdown(&self) -> Result<()> {
-        match self.data.status.compare_and_swap(STATUS_RUNNING, STATUS_SHUTDOWN,
-                                                Ordering::Relaxed) {
-            STATUS_NOT_INIT => bail!("Not yet connected to Discord!"),
+        match self.status.compare_and_swap(STATUS_RUNNING, STATUS_SHUTDOWN,
+                                           Ordering::Relaxed) {
+            STATUS_NOT_INIT => bail!("Bot not yet started!"),
+            STATUS_STARTING => bail!("Bot not yet fully started!"),
             STATUS_RUNNING  => {
-                self.data.shard_manager.lock().as_ref().map(|x| x.lock().shutdown_all());
-                while self.data.status.load(Ordering::Relaxed) != STATUS_DROPPED {
+                self.shard_manager.lock().as_ref().unwrap().lock().shutdown_all();
+                while self.status.load(Ordering::Relaxed) != STATUS_DROPPED {
                     thread::yield_now()
                 }
             },
@@ -254,36 +252,29 @@ impl DiscordBot {
         Ok(())
     }
     fn is_alive(&self) -> bool {
-        self.data.status.load(Ordering::Relaxed) == STATUS_RUNNING
+        self.status.load(Ordering::Relaxed) == STATUS_RUNNING
     }
 }
 
-pub struct DiscordManager {
-    config: ConfigManager, cmd_sender: CommandSender, bot: Option<DiscordBot>,
-    shutdown: AtomicBool, roles: RoleManager,
+enum BotStatus {
+    NotConnected, Connected(DiscordBot),
 }
-impl DiscordManager {
-    pub(in ::core) fn new(
-        config: ConfigManager, cmd_sender: CommandSender, roles: RoleManager,
-    ) -> DiscordManager {
-        DiscordManager { config, cmd_sender, bot: None, shutdown: AtomicBool::new(false), roles }
-    }
-
+impl BotStatus {
     fn check_bot_dead(&mut self) {
-        let is_dead = self.bot.as_ref().map_or(false, |bot| !bot.is_alive());
-        if is_dead { self.bot = None }
+        if let BotStatus::Connected(ref bot) = *self {
+            if !bot.is_alive() {
+                *self = BotStatus::NotConnected
+            }
+        }
     }
-
-    fn connect_internal(&mut self) -> Result<()> {
+    fn connect_internal(&mut self, shared: &Arc<DiscordBotSharedData>) -> Result<()> {
         self.check_bot_dead();
-        if self.bot.is_none() {
-            match self.config.get(None, ConfigKeys::DiscordToken)? {
+        if let BotStatus::NotConnected = *self {
+            match shared.config.get(None, ConfigKeys::DiscordToken)? {
                 Some(token) => {
-                    let bot = DiscordBot::new(&token,
-                                              self.config.clone(), self.cmd_sender.clone(),
-                                              self.roles.clone())?;
+                    let bot = DiscordBot::new(&token, shared.clone())?;
                     bot.start()?;
-                    self.bot = Some(bot);
+                    *self = BotStatus::Connected(bot);
                 }
                 None => info!("No token configured for the Discord bot. Please use \
                                \"set_global discord_token YOUR_DISCORD_TOKEN_HERE\" to \
@@ -294,34 +285,53 @@ impl DiscordManager {
     }
     fn disconnect_internal(&mut self) -> Result<()> {
         self.check_bot_dead();
-        if self.bot.is_some() {
-            self.bot.take().unwrap().shutdown()?;
+        if let BotStatus::Connected(ref bot) = *self {
+            bot.shutdown()?;
+            *self = BotStatus::NotConnected
         }
         Ok(())
+    }
+}
+
+pub struct DiscordManager {
+    bot: Mutex<BotStatus>, shutdown: AtomicBool, shared: Arc<DiscordBotSharedData>,
+}
+impl DiscordManager {
+    pub(in ::core) fn new(
+        config: ConfigManager, core_ref: CoreRef, roles: RoleManager, tasks: TaskManager,
+    ) -> DiscordManager {
+        DiscordManager {
+            bot: Mutex::new(BotStatus::NotConnected), shutdown: AtomicBool::new(false),
+            shared: Arc::new(DiscordBotSharedData { config, core_ref, roles, tasks }),
+        }
     }
 
-    pub fn connect(&mut self) -> Result<()> {
+    pub fn connect(&self) -> Result<()> {
         if !self.shutdown.load(Ordering::Relaxed) {
-            self.connect_internal()?;
+            let mut bot = self.bot.lock();
+            bot.connect_internal(&self.shared)?;
         }
         Ok(())
     }
-    pub fn disconnect(&mut self) -> Result<()> {
+    pub fn disconnect(&self) -> Result<()> {
         if !self.shutdown.load(Ordering::Relaxed) {
-            self.disconnect_internal()?;
+            let mut bot = self.bot.lock();
+            bot.disconnect_internal()?;
         }
         Ok(())
     }
-    pub fn reconnect(&mut self) -> Result<()> {
+    pub fn reconnect(&self) -> Result<()> {
         if !self.shutdown.load(Ordering::Relaxed) {
-            self.disconnect_internal()?;
-            self.connect_internal()?;
+            let mut bot = self.bot.lock();
+            bot.disconnect_internal()?;
+            bot.connect_internal(&self.shared)?;
         }
         Ok(())
     }
-    pub fn shutdown(&mut self) -> Result<()> {
+    pub(in ::core) fn shutdown(&self) -> Result<()> {
         if !self.shutdown.compare_and_swap(false, true, Ordering::Relaxed) {
-            self.disconnect_internal()?;
+            let mut bot = self.bot.lock();
+            bot.disconnect_internal()?;
         }
         Ok(())
     }

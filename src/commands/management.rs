@@ -33,19 +33,19 @@ pub const COMMANDS: &[Command] = &[
         .help(None, "Connects to Discord.")
         .terminal_only()
         .exec(|ctx| {
-            ctx.core.connect_discord()
+            ctx.core.discord().connect()
         }),
     Command::new("disconnect")
         .help(None, "Disconnects from Discord.")
         .terminal_only()
         .exec(|ctx| {
-            ctx.core.disconnect_discord()
+            ctx.core.discord().disconnect()
         }),
     Command::new("reconnect")
         .help(None, "Reconnects to Discord.")
         .terminal_only()
         .exec(|ctx| {
-            ctx.core.reconnect_discord()
+            ctx.core.discord().reconnect()
         }),
 
     // Debugging commands
@@ -60,20 +60,20 @@ pub const COMMANDS: &[Command] = &[
                 "test_deadlock" => {
                     cmd_ensure!(ctx.command_target != CommandTarget::Terminal,
                                 "This command *will* crash the bot and can only be called from \
-                                    terminal.");
+                                 terminal.");
                     let mutex_a1 = Arc::new(Mutex::new(()));
                     let mutex_b1 = Arc::new(Mutex::new(()));
                     let mutex_a2 = mutex_a1.clone();
                     let mutex_b2 = mutex_b1.clone();
                     thread::spawn(move || {
-                        let lock_a = mutex_a1.lock();
+                        let _lock_a = mutex_a1.lock();
                         thread::sleep(Duration::from_secs(1));
-                        let lock_b = mutex_b1.lock();
+                        let _lock_b = mutex_b1.lock();
                     });
                     thread::spawn(move || {
-                        let lock_b = mutex_b2.lock();
+                        let _lock_b = mutex_b2.lock();
                         thread::sleep(Duration::from_secs(1));
-                        let lock_a = mutex_a2.lock();
+                        let _lock_a = mutex_a2.lock();
                     });
                     ctx.respond("Deadlock created.")
                 },

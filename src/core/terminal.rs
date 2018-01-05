@@ -1,5 +1,5 @@
 use commands::*;
-use core::CommandSender;
+use core::CoreRef;
 use error_report;
 use errors::*;
 use linefeed::*;
@@ -38,11 +38,11 @@ impl CommandContextData for TerminalContext {
 }
 
 pub struct Terminal {
-    cmd_sender: CommandSender, sender: Mutex<Option<LogSender>>,
+    core_ref: CoreRef, sender: Mutex<Option<LogSender>>,
 }
 impl Terminal {
-    pub(in ::core) fn new(cmd_sender: CommandSender) -> Result<Terminal> {
-        Ok(Terminal { cmd_sender, sender: Mutex::new(None) })
+    pub(in ::core) fn new(core_ref: CoreRef) -> Result<Terminal> {
+        Ok(Terminal { core_ref, sender: Mutex::new(None) })
     }
     pub fn open(&self) -> Result<()> {
         let mut reader = Reader::new("sylph-verifier")?;
@@ -77,12 +77,12 @@ impl Terminal {
                             };
 
                             if command.no_threading {
-                                self.cmd_sender.run_command(command, &ctx)
+                                self.core_ref.run_command(command, &ctx)
                             } else {
-                                let cmd_sender = self.cmd_sender.clone();
+                                let core_ref = self.core_ref.clone();
                                 thread::Builder::new()
                                     .name(format!("command #{}", ctx.command_no + 1))
-                                    .spawn(move || cmd_sender.run_command(command, &ctx))?;
+                                    .spawn(move || core_ref.run_command(command, &ctx))?;
                                 thread::yield_now();
                             }
                         } else {
@@ -102,7 +102,7 @@ impl Terminal {
                         break 'outer
                     }
             }
-            if !self.cmd_sender.is_alive() {
+            if !self.core_ref.is_alive() {
                 break
             }
         }

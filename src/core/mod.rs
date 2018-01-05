@@ -1,7 +1,7 @@
 use commands::*;
 use database::Database;
 use errors::*;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use std::mem::drop;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,6 +13,7 @@ mod config;
 mod discord;
 mod place;
 mod roles;
+mod tasks;
 mod terminal;
 mod verifier;
 
@@ -23,6 +24,7 @@ pub use self::verifier::{Verifier, VerifyResult, TokenStatus, RekeyReason};
 use self::discord::DiscordManager;
 use self::place::PlaceManager;
 use self::terminal::Terminal;
+use self::tasks::TaskManager;
 
 const STATUS_STOPPED : u8 = 0;
 const STATUS_RUNNING : u8 = 1;
@@ -30,27 +32,27 @@ const STATUS_STOPPING: u8 = 2;
 
 struct VerifierCoreData {
     status: AtomicU8,
-    database: Database, config: ConfigManager, cmd_sender: CommandSender,
-    terminal: Terminal, verifier: Verifier, discord: Mutex<DiscordManager>,
-    place: PlaceManager, roles: RoleManager,
+    database: Database, config: ConfigManager, core_ref: CoreRef,
+    terminal: Terminal, verifier: Verifier, discord: DiscordManager,
+    place: PlaceManager, roles: RoleManager, tasks: TaskManager,
 }
 
-struct CommandSenderActiveGuard<'a>(&'a CommandSender);
-impl <'a> Drop for CommandSenderActiveGuard<'a> {
+struct CoreRefActiveGuard<'a>(&'a CoreRef);
+impl <'a> Drop for CoreRefActiveGuard<'a> {
     fn drop(&mut self) {
         *(self.0).0.write() = None
     }
 }
 
 #[derive(Clone)]
-struct CommandSender(Arc<RwLock<Option<Arc<VerifierCoreData>>>>);
-impl CommandSender {
-    fn new() -> CommandSender {
-        CommandSender(Arc::new(RwLock::new(None)))
+struct CoreRef(Arc<RwLock<Option<Arc<VerifierCoreData>>>>);
+impl CoreRef {
+    fn new() -> CoreRef {
+        CoreRef(Arc::new(RwLock::new(None)))
     }
-    fn activate(&self, core: &Arc<VerifierCoreData>) -> CommandSenderActiveGuard {
+    fn activate(&self, core: &Arc<VerifierCoreData>) -> CoreRefActiveGuard {
         *self.0.write() = Some(core.clone());
-        CommandSenderActiveGuard(self)
+        CoreRefActiveGuard(self)
     }
 
     pub fn is_alive(&self) -> bool {
@@ -60,14 +62,15 @@ impl CommandSender {
             false
         }
     }
+    pub fn get_core(&self) -> Option<VerifierCore> {
+        self.0.read().as_ref().map(|x| VerifierCore(x.clone()))
+    }
     pub fn run_command(&self, command: &Command, ctx: &CommandContextData) {
-        let core = self.0.read().as_ref().map(|x| VerifierCore(x.clone()));
-        match core {
-            Some(core) => command.run(ctx, &core),
-            None => {
-                ctx.respond("The bot is currently shutting down. Please wait until it is \
-                             restarted.").ok();
-            }
+        if let Some(core) = self.get_core() {
+            command.run(ctx, &core);
+        } else  {
+            ctx.respond("The bot is currently shutting down. Please wait until it is \
+                         restarted.").ok();
         }
     }
 }
@@ -82,18 +85,19 @@ impl VerifierCore {
         place_target.push(PLACE_TARGET_NAME);
 
         let config = ConfigManager::new(database.clone());
-        let cmd_sender = CommandSender::new();
+        let core_ref = CoreRef::new();
 
-        let terminal = Terminal::new(cmd_sender.clone())?;
+        let tasks = TaskManager::new(core_ref.clone())?;
+        let terminal = Terminal::new(core_ref.clone())?;
         let verifier = Verifier::new(config.clone(), database.clone())?;
         let place = PlaceManager::new(place_target)?;
         let roles = RoleManager::new(config.clone(), database.clone(), verifier.clone());
-        let discord =
-            Mutex::new(DiscordManager::new(config.clone(), cmd_sender.clone(), roles.clone()));
+        let discord = DiscordManager::new(config.clone(), core_ref.clone(),
+                                          roles.clone(), tasks.clone());
 
         Ok(VerifierCore(Arc::new(VerifierCoreData {
             status: AtomicU8::new(STATUS_STOPPED),
-            database, config, cmd_sender, terminal, verifier, discord, place, roles,
+            database, config, core_ref, terminal, verifier, discord, place, roles, tasks,
         })))
     }
     fn wait_on_instances(&self) {
@@ -118,14 +122,14 @@ impl VerifierCore {
         ensure!(self.0.status.compare_and_swap(STATUS_STOPPED, STATUS_RUNNING,
                                                Ordering::Relaxed) == STATUS_STOPPED,
                 "VerifierCore already started.");
-        let cmd_guard = self.0.cmd_sender.activate(&self.0);
+        let core_ref_guard = self.0.core_ref.activate(&self.0);
         self.refresh_place()?;
-        self.connect_discord()?;
+        self.0.discord.connect()?;
         self.0.terminal.open()?;
         ensure!(self.0.status.load(Ordering::Relaxed) == STATUS_STOPPING,
                 "Terminal interrupted without initializing shutdown!");
-        drop(cmd_guard);
-        self.0.discord.lock().shutdown()?;
+        drop(core_ref_guard);
+        self.0.discord.shutdown()?;
         self.wait_on_instances();
         ensure!(self.0.status.compare_and_swap(STATUS_STOPPING, STATUS_STOPPED,
                                                Ordering::Relaxed) == STATUS_STOPPING,
@@ -153,15 +157,8 @@ impl VerifierCore {
     pub fn verifier(&self) -> &Verifier {
         &self.0.verifier
     }
-
-    pub fn connect_discord(&self) -> Result<()> {
-        self.0.discord.lock().connect()
-    }
-    pub fn disconnect_discord(&self) -> Result<()> {
-        self.0.discord.lock().disconnect()
-    }
-    pub fn reconnect_discord(&self) -> Result<()> {
-        self.0.discord.lock().reconnect()
+    pub fn discord(&self) -> &DiscordManager {
+        &self.0.discord
     }
 
     pub fn refresh_place(&self) -> Result<()> {

@@ -1,8 +1,11 @@
 #![warn(unused_extern_crates)]
 #![recursion_limit="128"]
-#![feature(nll, box_patterns, never_type, integer_atomics, optin_builtin_traits, alloc_jemalloc,
+#![feature(nll, box_patterns, never_type, integer_atomics, optin_builtin_traits, fnbox,
            const_fn, const_atomic_bool_new, const_atomic_usize_new, conservative_impl_trait)]
 #![deny(unused_must_use)]
+
+// TODO: Clean up general program structure
+// TODO: Clean up program thread usage
 
 extern crate backtrace;
 extern crate byteorder;
@@ -11,6 +14,7 @@ extern crate constant_time_eq;
 extern crate fs2;
 extern crate hmac;
 extern crate linefeed;
+extern crate num_cpus;
 extern crate parking_lot;
 extern crate percent_encoding;
 extern crate r2d2;
@@ -21,6 +25,7 @@ extern crate rusqlite;
 extern crate serde_json;
 extern crate serenity;
 extern crate sha2;
+extern crate threadpool;
 extern crate uuid;
 
 #[allow(unused_extern_crates)] extern crate serde;

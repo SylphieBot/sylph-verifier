@@ -204,7 +204,7 @@ macro_rules! config_keys {
 config_keys! {
     // Discord settings
     CommandPrefix<String>("!".to_owned());
-    DiscordToken<Option<String>>(None, |core| core.reconnect_discord());
+    DiscordToken<Option<String>>(None, |core| core.discord().reconnect());
     BotOwnerId<Option<u64>>(None);
 
     // Limits for verification rules
