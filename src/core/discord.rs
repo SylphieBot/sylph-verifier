@@ -11,15 +11,13 @@ use serenity::client::bridge::gateway::ShardManager;
 use serenity::model::prelude::*;
 use serenity::prelude::*;
 use std::borrow::Cow;
+use std::cmp::max;
 use std::mem::drop;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;
 use util;
 use util::ConcurrentCache;
-
-// TODO: Implement SetOnJoin and UpdateOnMessage
-// TODO: Consider blocking a user from running multiple commands at once?
 
 struct DiscordContext<'a> {
     ctx: Context, message: &'a Message, content: &'a str, prefix: String,
@@ -144,8 +142,7 @@ impl Handler {
                     } else {
                         ctx.respond(&format!(
                             "<@{}> You are already running a command. Please wait for it \
-                             to finish running, then try again.",
-                            message.author.id
+                             to finish running, then try again.", message.author.id,
                         ))?;
                     };
                     debug!("Command #{} completed.", command_no);
@@ -168,6 +165,42 @@ impl EventHandler for Handler {
     }
 
     fn message(&self, ctx: Context, message: Message) {
+        // Check for roles update
+        error_report::catch_error(|| {
+            let guild_id = if let Some(channel) = message.channel() {
+                match channel {
+                    Channel::Guild(channel) => {
+                        let guild = channel.read().guild().chain_err(|| "Guild not found.")?;
+                        let guild = guild.read();
+                        guild.id
+                    }
+                    _ => return Ok(()),
+                }
+            } else {
+                return Ok(())
+            };
+
+            let set_roles_on_join =
+                self.shared.config.get(None, ConfigKeys::AllowEnableAutoUpdate)? &&
+                self.shared.config.get(Some(guild_id), ConfigKeys::EnableAutoUpdate)?;
+            if set_roles_on_join {
+                let auto_update_cooldown = max(
+                    self.shared.config.get(None, ConfigKeys::MinimumAutoUpdateCooldownSeconds)?,
+                    self.shared.config.get(Some(guild_id), ConfigKeys::AutoUpdateCooldownSeconds)?
+                );
+                let shared = self.shared.clone();
+                let user_id = message.author.id;
+                self.shared.tasks.dispatch_task(move |_| {
+                    shared.roles.update_user_with_cooldown(
+                        guild_id, user_id, auto_update_cooldown, false
+                    ).cmd_ok()?;
+                    Ok(())
+                })
+            }
+            Ok(())
+        }).ok();
+
+        // Process commands.
         let prefix = error_report::catch_error(||
             self.shared.config.get(None, ConfigKeys::CommandPrefix)
         );
@@ -197,8 +230,21 @@ impl EventHandler for Handler {
         }
     }
 
-    fn guild_member_addition(&self, _: Context, _: GuildId, _: Member) {
-
+    fn guild_member_addition(&self, _: Context, guild_id: GuildId, member: Member) {
+        error_report::catch_error(|| {
+            let set_roles_on_join =
+                self.shared.config.get(None, ConfigKeys::AllowSetRolesOnJoin)? &&
+                self.shared.config.get(Some(guild_id), ConfigKeys::SetRolesOnJoin)?;
+            if set_roles_on_join {
+                let shared = self.shared.clone();
+                let user_id = member.user.read().id;
+                self.shared.tasks.dispatch_task(move |_| {
+                    shared.roles.update_user_with_cooldown(guild_id, user_id, 0, false).cmd_ok()?;
+                    Ok(())
+                })
+            }
+            Ok(())
+        }).ok();
     }
 }
 

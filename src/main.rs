@@ -6,6 +6,9 @@
 
 // TODO: Clean up general program structure
 // TODO: Clean up program thread usage
+// TODO: Clean up program memory usage
+// TODO: Decide when SystemTime vs Instant is appropriate.
+// TODO: Pass around IDs less to touch Serenity's cache less.
 
 extern crate backtrace;
 extern crate byteorder;

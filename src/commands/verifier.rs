@@ -50,8 +50,8 @@ fn do_verify(ctx: &CommandContext, _: &Context, msg: &Message) -> Result<()> {
                     ctx.respond("Your roles have been set.")?,
                 SetRolesStatus::IsAdmin =>
                     ctx.respond("Your roles have been set. Note that your nickname has not been \
-                                 set, as you are an admin, and this bot does not have permission \
-                                 to edit your nickname.")?,
+                                 set, as you outrank the bot's roles, and this bot does not have \
+                                 permission to edit your nickname.")?,
             }
             Ok(())
         }
@@ -270,7 +270,6 @@ pub const COMMANDS: &[Command] = &[
         .help(None, "Updates your roles according to your Roblox account.")
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg| {
-            // TODO: Check if the user is actually verified.
             let guild_id = msg.guild_id().chain_err(|| "Guild ID not found.")?;
             let cooldown = max(
                 ctx.core.config().get(None, ConfigKeys::MinimumUpdateCooldownSeconds)?,

@@ -403,16 +403,26 @@ impl RoleManager {
         &self, guild_id: GuildId, user_id: UserId, cooldown: u64, is_manual: bool,
     ) -> Result<SetRolesStatus> {
         let cache = self.with_cooldown_cache(guild_id, user_id, is_manual)?;
-        let last_updated = cache.load();
         let now = SystemTime::now();
-        if let Some(last_updated) = last_updated {
-            let cooldown_ends = last_updated + Duration::from_secs(cooldown);
-            if now < cooldown_ends {
-                cmd_error!("You can only update your roles once every {}. Try again in {}.",
-                           util::to_english_time(cooldown),
-                           util::english_time_diff(now, cooldown_ends))
+        if cooldown != 0 {
+            let last_updated = cache.load();
+            if let Some(last_updated) = last_updated {
+                let cooldown_ends = last_updated + Duration::from_secs(cooldown);
+                if now < cooldown_ends {
+                    cmd_error!("You can only update your roles once every {}. Try again in {}.",
+                               util::to_english_time(cooldown),
+                               util::english_time_diff(now, cooldown_ends))
+                }
             }
         }
+
+        // TODO: Resolve this stuff.
+        if !is_manual {
+            debug!("Automatically updating roles for <@{}> in {}.", user_id, guild_id);
+        } else {
+            debug!("Manually updating roles for <@{}> in {}.", user_id, guild_id);
+        }
+
         let result = self.update_user(guild_id, user_id)?;
         self.0.database.connect()?.execute_cached(
             "INSERT INTO roles_last_updated (\
@@ -429,7 +439,7 @@ impl RoleManager {
         let read = lock.read();
         match *read {
             VerificationSetStatus::Compiled(ref set, _) => Ok(format!("{}", set)),
-            VerificationSetStatus::Error(ref err) => Ok(format!("Could not compile: {}", err)),
+            VerificationSetStatus::Error(ref err) => cmd_error!("Could not compile: {}", err),
             VerificationSetStatus::NotCompiled => unimplemented!(),
         }
     }

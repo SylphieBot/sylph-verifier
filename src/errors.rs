@@ -77,9 +77,21 @@ macro_rules! cmd_ensure {
 }
 
 pub trait ResultCmdExt<T> {
+    fn cmd_ok(self) -> Result<()>;
+}
+impl <T> ResultCmdExt<T> for Result<T> {
+    fn cmd_ok(self) -> Result<()> {
+        match self {
+            Ok(_) | Err(Error(box (ErrorKind::CommandError(_), _))) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+pub trait IntoResultCmdExt<T> {
     fn to_cmd_err<F, R: Into<String>>(self, f: F) -> Result<T> where F: FnOnce() -> R;
 }
-impl <T, E: ResultExt<T>> ResultCmdExt<T> for E {
+impl <T, E: ResultExt<T>> IntoResultCmdExt<T> for E {
     fn to_cmd_err<F, R: Into<String>>(self, f: F) -> Result<T> where F: FnOnce() -> R {
         self.chain_err(|| ErrorKind::CommandError(f().into()))
     }

@@ -1,7 +1,8 @@
 use errors::*;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockReadGuard};
 use reqwest;
 use serenity::model::prelude::*;
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
