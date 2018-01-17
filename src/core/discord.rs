@@ -12,12 +12,12 @@ use serenity::model::prelude::*;
 use serenity::prelude::*;
 use std::borrow::Cow;
 use std::cmp::max;
+use std::collections::HashSet;
 use std::mem::drop;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;
 use util;
-use util::ConcurrentCache;
 
 struct DiscordContext<'a> {
     ctx: Context, message: &'a Message, content: &'a str, prefix: String,
@@ -65,7 +65,7 @@ struct DiscordBotSharedData {
 }
 
 struct Handler {
-    user_prefix: RwLock<Option<String>>, is_in_command: ConcurrentCache<UserId, Mutex<()>>,
+    user_prefix: RwLock<Option<String>>, is_in_command: Arc<Mutex<HashSet<UserId>>>,
     shared: Arc<DiscordBotSharedData>, status: Arc<AtomicU8>,
 }
 impl Handler {
@@ -125,7 +125,7 @@ impl Handler {
 
         let core_ref = self.shared.core_ref.clone();
         let bot_owner_id = self.shared.config.get(None, ConfigKeys::BotOwnerId)?.map(UserId);
-        let mutex = self.is_in_command.read(&message.author.id, || Ok(Mutex::new(())))?;
+        let is_in_command = self.is_in_command.clone();
         thread::Builder::new().name(format!("command #{}", command_no)).spawn(move || {
             error_report::catch_error(move || {
                 if let Some(channel) = message.channel() {
@@ -136,9 +136,18 @@ impl Handler {
                         ctx, message: &message, prefix, content: &content,
                         privilege_level, command_target, command_no,
                     };
-                    if let Some(lock) = mutex.try_lock() {
+                    let no_command_running = {
+                        let mut is_in_command = is_in_command.lock();
+                        if is_in_command.contains(&message.author.id) {
+                            false
+                        } else {
+                            is_in_command.insert(message.author.id);
+                            true
+                        }
+                    };
+                    if no_command_running {
                         core_ref.run_command(command, &ctx);
-                        drop(lock);
+                        is_in_command.lock().remove(&message.author.id);
                     } else {
                         ctx.respond(&format!(
                             "<@{}> You are already running a command. Please wait for it \
@@ -264,7 +273,7 @@ impl DiscordBot {
                                              Ordering::Relaxed) == STATUS_NOT_INIT,
                 "Discord component already started!");
         let mut client = Client::new(&self.token, Handler {
-            user_prefix: RwLock::new(None), is_in_command: ConcurrentCache::new(),
+            user_prefix: RwLock::new(None), is_in_command: Arc::new(Mutex::new(HashSet::new())),
             shared: self.shared.clone(), status: self.status.clone(),
         })?;
         *self.shard_manager.lock() = Some(client.shard_manager.clone());
