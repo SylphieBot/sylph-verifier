@@ -429,7 +429,7 @@ impl RoleManager {
 
         let result = self.update_user(guild_id, user_id)?;
         self.0.database.connect()?.execute_cached(
-            "INSERT INTO roles_last_updated (\
+            "REPLACE INTO roles_last_updated (\
                 discord_guild_id, discord_user_id, is_manual, last_updated\
             ) VALUES (?1, ?2, ?3, ?4)", (guild_id, user_id, is_manual, now),
         )?;
