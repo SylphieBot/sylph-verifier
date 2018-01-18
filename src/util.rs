@@ -1,11 +1,12 @@
 use errors::*;
-use parking_lot::{RwLock, RwLockReadGuard};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use reqwest;
 use serenity::model::prelude::*;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::sync::atomic::{AtomicUsize, AtomicI64, Ordering};
+use std::mem::drop;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn div_ceil(a: u64, b: u64) -> u64 {
@@ -67,21 +68,6 @@ pub fn time_to_i64(time: SystemTime) -> i64 {
     }
 }
 
-// Atomic time
-pub struct AtomicSystemTime(AtomicI64);
-impl AtomicSystemTime {
-    pub fn new(time: Option<SystemTime>) -> AtomicSystemTime {
-        AtomicSystemTime(AtomicI64::new(time.map_or(i64::min_value(), time_to_i64)))
-    }
-    pub fn store(&self, time: Option<SystemTime>) {
-        self.0.store(time.map_or(i64::min_value(), time_to_i64), Ordering::Relaxed)
-    }
-    pub fn load(&self) -> Option<SystemTime> {
-        let val = self.0.load(Ordering::Relaxed);
-        if val == i64::min_value() { None } else { Some(time_from_i64(val)) }
-    }
-}
-
 // Concurrent cache implementation
 pub struct ConcurrentCache<K: Clone + Eq + Hash + Sync, V: Sync>(RwLock<HashMap<K, V>>);
 impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
@@ -93,23 +79,44 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
         &self, k: &K, mut create: F
     ) -> Result<RwLockReadGuard<V>> where F: FnMut() -> Result<V> {
         loop {
-            {
-                let read = self.0.read();
-                if read.contains_key(k) {
-                    return Ok(RwLockReadGuard::map(read, |x| x.get(k).unwrap()))
-                }
+            let read = self.0.read();
+            if read.contains_key(k) {
+                return Ok(RwLockReadGuard::map(read, |x| x.get(k).unwrap()))
             }
+            drop(read);
 
-            {
-                let new_value = create()?;
-                let mut write = self.0.write();
-                if !write.contains_key(&k) {
-                    write.insert(k.clone(), new_value);
-                }
+            let new_value = create()?;
+            let mut write = self.0.write();
+            if !write.contains_key(&k) {
+                write.insert(k.clone(), new_value);
             }
         }
     }
+    pub fn write<F>(
+        &self, k: &K, create: F
+    ) -> Result<RwLockWriteGuard<V>> where F: FnOnce() -> Result<V> {
+        let write = self.0.write();
+        if write.contains_key(k) {
+            Ok(RwLockWriteGuard::map(write, |x| x.get_mut(k).unwrap()))
+        } else {
+            drop(write);
 
+            let new_value = create()?;
+            let mut write = self.0.write();
+            if !write.contains_key(&k) {
+                write.insert(k.clone(), new_value);
+            }
+            Ok(RwLockWriteGuard::map(write, |x| x.get_mut(k).unwrap()))
+        }
+    }
+
+    pub fn for_each<F>(&self, mut f: F) -> Result<()> where F: FnMut(&V) -> Result<()> {
+        let read = self.0.read();
+        for (_, v) in read.iter() {
+            f(v)?;
+        }
+        Ok(())
+    }
     pub fn remove<Q: Eq + Hash>(&self, k: &Q) -> Option<V> where K: Borrow<Q> {
         self.0.write().remove(k)
     }
