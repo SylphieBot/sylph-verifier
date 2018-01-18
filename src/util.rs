@@ -90,24 +90,24 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
     }
 
     pub fn read<F>(
-        &self, k: &K, create: F
-    ) -> Result<RwLockReadGuard<V>> where F: FnOnce() -> Result<V> {
-        {
-            let read = self.0.read();
-            if read.contains_key(k) {
-                return Ok(RwLockReadGuard::map(read, |x| x.get(k).unwrap()))
+        &self, k: &K, mut create: F
+    ) -> Result<RwLockReadGuard<V>> where F: FnMut() -> Result<V> {
+        loop {
+            {
+                let read = self.0.read();
+                if read.contains_key(k) {
+                    return Ok(RwLockReadGuard::map(read, |x| x.get(k).unwrap()))
+                }
+            }
+
+            {
+                let new_value = create()?;
+                let mut write = self.0.write();
+                if !write.contains_key(&k) {
+                    write.insert(k.clone(), new_value);
+                }
             }
         }
-
-        {
-            let new_value = create()?;
-            let mut write = self.0.write();
-            if !write.contains_key(&k) {
-                write.insert(k.clone(), new_value);
-            }
-        }
-
-        Ok(RwLockReadGuard::map(self.0.read(), |x| x.get(k).unwrap()))
     }
 
     pub fn remove<Q: Eq + Hash>(&self, k: &Q) -> Option<V> where K: Borrow<Q> {

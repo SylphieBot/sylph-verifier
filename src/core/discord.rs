@@ -160,6 +160,11 @@ impl Handler {
         })?;
         Ok(())
     }
+
+    fn on_guild_remove(&self, guild_id: GuildId) {
+        self.shared.roles.on_guild_remove(guild_id);
+        self.shared.config.on_guild_remove(guild_id);
+    }
 }
 impl Drop for Handler {
     fn drop(&mut self) {
@@ -253,6 +258,13 @@ impl EventHandler for Handler {
             }
             Ok(())
         }).ok();
+    }
+
+    fn guild_delete(&self, _: Context, guild: PartialGuild, _: Option<Arc<RwLock<Guild>>>) {
+        self.on_guild_remove(guild.id);
+    }
+    fn guild_unavailable(&self, _: Context, guild_id: GuildId) {
+        self.on_guild_remove(guild_id);
     }
 }
 

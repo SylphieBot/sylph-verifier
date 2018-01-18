@@ -306,4 +306,8 @@ impl ConfigManager {
     ) -> Result<T> {
         self.get_internal(&self.0.database.connect()?, guild, key)
     }
+
+    pub fn on_guild_remove(&self, guild: GuildId) {
+        self.0.guild_cache.remove(&guild);
+    }
 }

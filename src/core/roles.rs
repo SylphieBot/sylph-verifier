@@ -2,7 +2,7 @@ use core::config::*;
 use core::verifier::*;
 use database::*;
 use errors::*;
-use parking_lot::{RwLock, RwLockReadGuard};
+use parking_lot::RwLock;
 use serenity;
 use serenity::model::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -40,7 +40,7 @@ pub enum SetRolesStatus {
 struct RoleManagerData {
     config: ConfigManager, database: Database, verifier: Verifier,
     rule_cache: ConcurrentCache<GuildId, Arc<RwLock<VerificationSetStatus>>>,
-    last_update_cache: ConcurrentCache<(GuildId, UserId, bool), AtomicSystemTime>,
+    update_cache: ConcurrentCache<GuildId, Arc<ConcurrentCache<(UserId, bool), AtomicSystemTime>>>,
 }
 #[derive(Clone)]
 pub struct RoleManager(Arc<RoleManagerData>);
@@ -48,7 +48,7 @@ impl RoleManager {
     pub fn new(config: ConfigManager, database: Database, verifier: Verifier) -> RoleManager {
         RoleManager(Arc::new(RoleManagerData {
             config, database, verifier,
-            rule_cache: ConcurrentCache::new(), last_update_cache: ConcurrentCache::new(),
+            rule_cache: ConcurrentCache::new(), update_cache: ConcurrentCache::new(),
         }))
     }
 
@@ -389,24 +389,28 @@ impl RoleManager {
         self.assign_roles(guild, discord_id, self.0.verifier.get_verified_roblox_user(discord_id)?)
     }
 
-    fn with_cooldown_cache(
-        &self, guild_id: GuildId, user_id: UserId, is_manual: bool
-    ) -> Result<RwLockReadGuard<AtomicSystemTime>> {
-        self.0.last_update_cache.read(&(guild_id, user_id, is_manual), || {
+    fn with_cooldown_cache<T, F>(
+        &self, guild_id: GuildId, user_id: UserId, is_manual: bool, f: F,
+    ) -> Result<T> where F: FnOnce(&AtomicSystemTime) -> Result<T> {
+        let cache =
+            self.0.update_cache.read(&guild_id, || Ok(Arc::new(ConcurrentCache::new())))?.clone();
+        let last_update = cache.read(&(user_id, is_manual), || {
             let time = self.0.database.connect()?.query_cached(
                 "SELECT last_updated FROM roles_last_updated \
                  WHERE discord_guild_id = ?1 AND discord_user_id = ?2 AND is_manual = ?3",
                 (guild_id, user_id, is_manual)
             ).get_opt::<SystemTime>()?;
             Ok(AtomicSystemTime::new(time))
-        })
+        })?;
+        f(&last_update)
     }
     pub fn update_user_with_cooldown(
         &self, guild_id: GuildId, user_id: UserId, cooldown: u64, is_manual: bool,
     ) -> Result<SetRolesStatus> {
         let now = SystemTime::now();
         if cooldown != 0 {
-            let last_updated = self.with_cooldown_cache(guild_id, user_id, is_manual)?.load();
+            let last_updated =
+                self.with_cooldown_cache(guild_id, user_id, is_manual, |x| Ok(x.load()))?;
             if let Some(last_updated) = last_updated {
                 let cooldown_ends = last_updated + Duration::from_secs(cooldown);
                 if now < cooldown_ends {
@@ -430,7 +434,10 @@ impl RoleManager {
                 discord_guild_id, discord_user_id, is_manual, last_updated\
             ) VALUES (?1, ?2, ?3, ?4)", (guild_id, user_id, is_manual, now),
         )?;
-        self.with_cooldown_cache(guild_id, user_id, is_manual)?.store(Some(now));
+        self.with_cooldown_cache(guild_id, user_id, is_manual, |x| {
+            x.store(Some(now));
+            Ok(())
+        })?;
         Ok(result)
     }
 
@@ -445,6 +452,10 @@ impl RoleManager {
         }
     }
 
+    pub fn on_guild_remove(&self, guild: GuildId) {
+        self.0.rule_cache.remove(&guild);
+        self.0.update_cache.remove(&guild);
+    }
     pub fn clear_rule_cache(&self) {
         self.0.rule_cache.clear_cache()
     }
