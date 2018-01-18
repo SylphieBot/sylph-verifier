@@ -61,11 +61,11 @@ const STATUS_DROPPED : u8 = 4;
 
 struct DiscordBotSharedData {
     config: ConfigManager, core_ref: CoreRef, roles: RoleManager, tasks: TaskManager,
+    is_in_command: Arc<Mutex<HashSet<UserId>>>,
 }
 
 struct Handler {
-    user_prefix: RwLock<Option<String>>, is_in_command: Arc<Mutex<HashSet<UserId>>>,
-    shared: Arc<DiscordBotSharedData>, status: Arc<AtomicU8>,
+    user_prefix: RwLock<Option<String>>, shared: Arc<DiscordBotSharedData>, status: Arc<AtomicU8>,
 }
 impl Handler {
     fn context_str(message: &Message) -> Cow<str> {
@@ -124,7 +124,7 @@ impl Handler {
 
         let core_ref = self.shared.core_ref.clone();
         let bot_owner_id = self.shared.config.get(None, ConfigKeys::BotOwnerId)?.map(UserId);
-        let is_in_command = self.is_in_command.clone();
+        let is_in_command = self.shared.is_in_command.clone();
         thread::Builder::new().name(format!("command #{}", command_no)).spawn(move || {
             error_report::catch_error(move || {
                 if let Some(channel) = message.channel() {
@@ -284,8 +284,9 @@ impl DiscordBot {
                                              Ordering::Relaxed) == STATUS_NOT_INIT,
                 "Discord component already started!");
         let mut client = Client::new(&self.token, Handler {
-            user_prefix: RwLock::new(None), is_in_command: Arc::new(Mutex::new(HashSet::new())),
-            shared: self.shared.clone(), status: self.status.clone(),
+            user_prefix: RwLock::new(None),
+            shared: self.shared.clone(),
+            status: self.status.clone(),
         })?;
         *self.shard_manager.lock() = Some(client.shard_manager.clone());
         ensure!(self.status.compare_and_swap(STATUS_STARTING, STATUS_RUNNING,
@@ -368,7 +369,10 @@ impl DiscordManager {
     ) -> DiscordManager {
         DiscordManager {
             bot: Mutex::new(BotStatus::NotConnected), shutdown: AtomicBool::new(false),
-            shared: Arc::new(DiscordBotSharedData { config, core_ref, roles, tasks }),
+            shared: Arc::new(DiscordBotSharedData {
+                config, core_ref, roles, tasks,
+                is_in_command: Arc::new(Mutex::new(HashSet::new())),
+            }),
         }
     }
 
@@ -400,5 +404,9 @@ impl DiscordManager {
             bot.disconnect_internal()?;
         }
         Ok(())
+    }
+
+    pub fn on_cleanup_tick(&self) {
+        self.shared.is_in_command.lock().shrink_to_fit()
     }
 }

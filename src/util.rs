@@ -115,6 +115,9 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
             f(v);
         }
     }
+    pub fn shrink_to_fit(&self) {
+        self.0.write().shrink_to_fit();
+    }
     pub fn remove<Q: Eq + Hash>(&self, k: &Q) -> Option<V> where K: Borrow<Q> {
         self.0.write().remove(k)
     }
@@ -122,7 +125,7 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
         self.0.write().retain(|k, v| f(k, &v));
     }
     pub fn clear_cache(&self) {
-        self.0.write().clear()
+        *self.0.write() = HashMap::new();
     }
 }
 

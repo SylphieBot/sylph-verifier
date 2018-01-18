@@ -105,6 +105,9 @@ impl VerifierCore {
     }
 
     fn cleanup(&self) -> Result<()> {
+        debug!("Running garbage collection.");
+        self.0.config.on_cleanup_tick();
+        self.0.discord.on_cleanup_tick();
         self.0.roles.on_cleanup_tick();
         Ok(())
     }
