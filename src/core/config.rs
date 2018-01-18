@@ -254,7 +254,7 @@ config_keys! {
 struct ConfigManagerData {
     database: Database,
     global_cache: Arc<ConfigCache>,
-    guild_cache: ConcurrentCache<GuildId, ConfigCache>,
+    guild_cache: ConcurrentCache<GuildId, Arc<ConfigCache>>,
 }
 
 #[derive(Clone)]
@@ -271,8 +271,10 @@ impl ConfigManager {
 
     fn get_cache(&self, guild: Option<GuildId>) -> Result<Arc<ConfigCache>> {
         match guild {
-            Some(guild) => self.0.guild_cache.read(&guild, || Ok(ConfigCache::new())),
-            None => Ok(self.0.global_cache.clone()),
+            Some(guild) =>
+                Ok(self.0.guild_cache.read(&guild, || Ok(Arc::new(ConfigCache::new())))?.clone()),
+            None =>
+                Ok(self.0.global_cache.clone()),
         }
     }
     pub fn set<T : ToSql + Clone + Any + Send + Sync>(

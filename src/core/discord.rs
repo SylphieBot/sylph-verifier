@@ -13,7 +13,6 @@ use serenity::prelude::*;
 use std::borrow::Cow;
 use std::cmp::max;
 use std::collections::HashSet;
-use std::mem::drop;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;

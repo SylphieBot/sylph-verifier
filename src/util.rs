@@ -5,7 +5,6 @@ use serenity::model::prelude::*;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, AtomicI64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -84,43 +83,38 @@ impl AtomicSystemTime {
 }
 
 // Concurrent cache implementation
-struct CacheValue<V: Sync>(Arc<V>, AtomicSystemTime);
-pub struct ConcurrentCache<K: Clone + Eq + Hash + Sync, V: Sync>(
-    RwLock<HashMap<K, CacheValue<V>>>
-);
+pub struct ConcurrentCache<K: Clone + Eq + Hash + Sync, V: Sync>(RwLock<HashMap<K, V>>);
 impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
     pub fn new() -> Self {
         ConcurrentCache(RwLock::new(HashMap::new()))
     }
 
-    pub fn read<F>(&self, k: &K, create: F) -> Result<Arc<V>> where F: FnOnce() -> Result<V> {
+    pub fn read<F>(
+        &self, k: &K, create: F
+    ) -> Result<RwLockReadGuard<V>> where F: FnOnce() -> Result<V> {
         {
             let read = self.0.read();
-            if let Some(value) = read.get(k) {
-                value.1.store(Some(SystemTime::now()));
-                return Ok(value.0.clone())
+            if read.contains_key(k) {
+                return Ok(RwLockReadGuard::map(read, |x| x.get(k).unwrap()))
             }
         }
 
         {
             let new_value = create()?;
             let mut write = self.0.write();
-            if write.get(k).is_none() {
-                let new = CacheValue(Arc::new(new_value),
-                                     AtomicSystemTime::new(Some(SystemTime::now())));
-                write.insert(k.clone(), new);
+            if !write.contains_key(&k) {
+                write.insert(k.clone(), new_value);
             }
         }
 
-        Ok(self.0.read().get(k).unwrap().0.clone())
+        Ok(RwLockReadGuard::map(self.0.read(), |x| x.get(k).unwrap()))
     }
 
-    pub fn retain<F>(&self, mut f: F) where F: FnMut(&K, &V) -> bool {
-        self.0.write().retain(|k, v| f(k, & v.0));
+    pub fn remove<Q: Eq + Hash>(&self, k: &Q) -> Option<V> where K: Borrow<Q> {
+        self.0.write().remove(k)
     }
-    pub fn clear_old(&self, cutoff_duration: Duration) {
-        let cutoff = SystemTime::now() - cutoff_duration;
-        self.0.write().retain(|_, v| v.1.load().unwrap() >= cutoff);
+    pub fn retain<F>(&self, mut f: F) where F: FnMut(&K, &V) -> bool {
+        self.0.write().retain(|k, v| f(k, &v));
     }
     pub fn clear_cache(&self) {
         self.0.write().clear()
