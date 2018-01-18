@@ -16,6 +16,8 @@ const TOKEN_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const TOKEN_VERSION: u32 = 1;
 const HISTORY_COUNT: u32 = 5;
 
+// TODO: Implement !whois command.
+
 #[derive(Clone, Hash, Debug, PartialOrd, Ord)]
 struct Token([u8; 6]);
 impl Token {

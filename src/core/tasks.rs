@@ -12,8 +12,6 @@ use std::thread::Builder;
 use std::time::Duration;
 use threadpool::ThreadPool;
 
-// TODO: Figure out a more principled way of handling the thread pool than stuffing it in a mutex.
-
 const MAX_SECS: usize = 4096; // 68 minutes
 
 enum Task {

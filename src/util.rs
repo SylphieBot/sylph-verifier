@@ -110,12 +110,10 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
         }
     }
 
-    pub fn for_each<F>(&self, mut f: F) -> Result<()> where F: FnMut(&V) -> Result<()> {
-        let read = self.0.read();
-        for (_, v) in read.iter() {
-            f(v)?;
+    pub fn for_each<F>(&self, mut f: F) where F: FnMut(&V) {
+        for (_, v) in self.0.read().iter() {
+            f(v);
         }
-        Ok(())
     }
     pub fn remove<Q: Eq + Hash>(&self, k: &Q) -> Option<V> where K: Borrow<Q> {
         self.0.write().remove(k)

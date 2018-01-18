@@ -451,6 +451,12 @@ impl RoleManager {
         }
     }
 
+    pub fn on_cleanup_tick(&self) {
+        let outdated_threshold = SystemTime::now() - Duration::from_secs(60 * 60 * 4);
+        self.0.update_cache.for_each(|cache| cache.retain(|_, value|
+            value.map_or(false, |time| time > outdated_threshold)
+        ))
+    }
     pub fn on_guild_remove(&self, guild: GuildId) {
         self.0.rule_cache.remove(&guild);
         self.0.update_cache.remove(&guild);

@@ -11,6 +11,8 @@ use std::io::{BufWriter, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+// TODO: Use log4rs, which provides much of the functionality of this module.
+
 #[derive(Debug)]
 struct LogPolicy {
     module: &'static str, console: LevelFilter, log: LevelFilter,

@@ -18,6 +18,8 @@ use std::process::abort;
 use std::thread;
 use std::time::Duration;
 
+// TODO: Separate this out into its own crate -- too useful not to.
+
 #[derive(Copy, Clone)]
 enum ReportType {
     Error, Panic, Deadlock,

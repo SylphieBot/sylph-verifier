@@ -6,9 +6,8 @@
 
 // TODO: Clean up general program structure
 // TODO: Clean up program thread usage
-// TODO: Clean up program memory usage
-// TODO: Decide when SystemTime vs Instant is appropriate.
 // TODO: Pass around IDs less to touch Serenity's cache less.
+// TODO: Add statistics tracking to better understand current bot load.
 
 extern crate backtrace;
 extern crate byteorder;

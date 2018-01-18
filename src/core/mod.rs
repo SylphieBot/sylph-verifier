@@ -32,9 +32,9 @@ const STATUS_STOPPING: u8 = 2;
 
 struct VerifierCoreData {
     status: AtomicU8,
-    database: Database, config: ConfigManager, core_ref: CoreRef,
+    _database: Database, config: ConfigManager, core_ref: CoreRef,
     terminal: Terminal, verifier: Verifier, discord: DiscordManager,
-    place: PlaceManager, roles: RoleManager, tasks: TaskManager,
+    place: PlaceManager, roles: RoleManager, _tasks: TaskManager,
 }
 
 struct CoreRefActiveGuard<'a>(&'a CoreRef);
@@ -95,10 +95,18 @@ impl VerifierCore {
         let discord = DiscordManager::new(config.clone(), core_ref.clone(),
                                           roles.clone(), tasks.clone());
 
+        tasks.dispatch_repeating_task(Duration::from_secs(60 * 10), |core| core.cleanup());
+
         Ok(VerifierCore(Arc::new(VerifierCoreData {
             status: AtomicU8::new(STATUS_STOPPED),
-            database, config, core_ref, terminal, verifier, discord, place, roles, tasks,
+            _database: database, _tasks: tasks,
+            config, core_ref, terminal, verifier, discord, place, roles,
         })))
+    }
+
+    fn cleanup(&self) -> Result<()> {
+        self.0.roles.on_cleanup_tick();
+        Ok(())
     }
     fn wait_on_instances(&self) {
         let mut next_message = Instant::now() + Duration::from_secs(1);
