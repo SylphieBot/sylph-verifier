@@ -57,5 +57,5 @@ CREATE TABLE roles_last_updated (
 
 -- Information about verification channels.
 CREATE TABLE verification_channel_info (
-  discord_channel_id BIGINT PRIMARY KEY, header_message_id BIGINT NOT NULL
+  discord_guild_id BIGINT PRIMARY KEY, discord_channel_id BIGINT NOT NULL, header_message_id BIGINT NOT NULL
 ) WITHOUT ROWID;

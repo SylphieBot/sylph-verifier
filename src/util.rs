@@ -69,40 +69,40 @@ pub fn time_to_i64(time: SystemTime) -> i64 {
 }
 
 // Concurrent cache implementation
-pub struct ConcurrentCache<K: Clone + Eq + Hash + Sync, V: Sync>(RwLock<HashMap<K, V>>);
+pub struct ConcurrentCache<K: Clone + Eq + Hash + Sync, V: Sync> {
+    data: RwLock<HashMap<K, V>>, create: Box<Fn(&K) -> Result<V> + Send + Sync + 'static>,
+}
 impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
-    pub fn new() -> Self {
-        ConcurrentCache(RwLock::new(HashMap::new()))
+    pub fn new<F>(f: F) -> Self where F: Fn(&K) -> Result<V> + Send + Sync + 'static {
+        ConcurrentCache {
+            data: RwLock::new(HashMap::new()), create: Box::new(f),
+        }
     }
 
-    pub fn read<F>(
-        &self, k: &K, mut create: F
-    ) -> Result<RwLockReadGuard<V>> where F: FnMut() -> Result<V> {
+    pub fn read(&self, k: &K) -> Result<RwLockReadGuard<V>> {
         loop {
-            let read = self.0.read();
+            let read = self.data.read();
             if read.contains_key(k) {
                 return Ok(RwLockReadGuard::map(read, |x| x.get(k).unwrap()))
             }
             drop(read);
 
-            let new_value = create()?;
-            let mut write = self.0.write();
+            let new_value = (self.create)(k)?;
+            let mut write = self.data.write();
             if !write.contains_key(&k) {
                 write.insert(k.clone(), new_value);
             }
         }
     }
-    pub fn write<F>(
-        &self, k: &K, create: F
-    ) -> Result<RwLockWriteGuard<V>> where F: FnOnce() -> Result<V> {
-        let write = self.0.write();
+    pub fn write(&self, k: &K) -> Result<RwLockWriteGuard<V>> {
+        let write = self.data.write();
         if write.contains_key(k) {
             Ok(RwLockWriteGuard::map(write, |x| x.get_mut(k).unwrap()))
         } else {
             drop(write);
 
-            let new_value = create()?;
-            let mut write = self.0.write();
+            let new_value = (self.create)(k)?;
+            let mut write = self.data.write();
             if !write.contains_key(&k) {
                 write.insert(k.clone(), new_value);
             }
@@ -111,21 +111,21 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
     }
 
     pub fn for_each<F>(&self, mut f: F) where F: FnMut(&V) {
-        for (_, v) in self.0.read().iter() {
+        for (_, v) in self.data.read().iter() {
             f(v);
         }
     }
     pub fn shrink_to_fit(&self) {
-        self.0.write().shrink_to_fit();
+        self.data.write().shrink_to_fit();
     }
     pub fn remove<Q: Eq + Hash>(&self, k: &Q) -> Option<V> where K: Borrow<Q> {
-        self.0.write().remove(k)
+        self.data.write().remove(k)
     }
     pub fn retain<F>(&self, mut f: F) where F: FnMut(&K, &V) -> bool {
-        self.0.write().retain(|k, v| f(k, &v));
+        self.data.write().retain(|k, v| f(k, &v));
     }
     pub fn clear_cache(&self) {
-        *self.0.write() = HashMap::new();
+        *self.data.write() = HashMap::new();
     }
 }
 

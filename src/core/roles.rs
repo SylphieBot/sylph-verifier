@@ -1,10 +1,12 @@
 use core::config::*;
+use core::tasks::*;
 use core::verifier::*;
 use database::*;
 use errors::*;
 use parking_lot::RwLock;
 use serenity;
 use serenity::model::prelude::*;
+use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::mem::drop;
 use std::sync::Arc;
@@ -38,17 +40,28 @@ pub enum SetRolesStatus {
 }
 
 struct RoleManagerData {
-    config: ConfigManager, database: Database, verifier: Verifier,
+    config: ConfigManager, database: Database, verifier: Verifier, tasks: TaskManager,
     rule_cache: ConcurrentCache<GuildId, Arc<RwLock<VerificationRulesStatus>>>,
     update_cache: ConcurrentCache<GuildId, Arc<ConcurrentCache<(UserId, bool), Option<SystemTime>>>>,
 }
 #[derive(Clone)]
 pub struct RoleManager(Arc<RoleManagerData>);
 impl RoleManager {
-    pub fn new(config: ConfigManager, database: Database, verifier: Verifier) -> RoleManager {
+    pub fn new(
+        config: ConfigManager, database: Database, verifier: Verifier, tasks: TaskManager,
+    ) -> RoleManager {
+        let db_ref_update = database.clone();
         RoleManager(Arc::new(RoleManagerData {
-            config, database, verifier,
-            rule_cache: ConcurrentCache::new(), update_cache: ConcurrentCache::new(),
+            config, database, verifier, tasks,
+            rule_cache: ConcurrentCache::new(|_|
+                Ok(Arc::new(RwLock::new(VerificationRulesStatus::NotCompiled)))
+            ),
+            update_cache: ConcurrentCache::new(move |&guild_id| {
+                let db_ref_update = db_ref_update.clone();
+                Ok(Arc::new(ConcurrentCache::new(move |&(user_id, is_manual)|
+                    Self::get_cooldown_cache(&db_ref_update, guild_id, user_id, is_manual)
+                )))
+            }),
         }))
     }
 
@@ -168,13 +181,6 @@ impl RoleManager {
         }
     }
 
-    fn get_rule_cache(
-        &self, guild: GuildId
-    ) -> Result<Arc<RwLock<VerificationRulesStatus>>> {
-        Ok(self.0.rule_cache.read(
-            &guild, || Ok(Arc::new(RwLock::new(VerificationRulesStatus::NotCompiled)))
-        )?.clone())
-    }
     fn update_cached_rules(
         &self, lock: &RwLock<VerificationRulesStatus>, guild: GuildId, force: bool,
     ) -> Result<()> {
@@ -189,7 +195,7 @@ impl RoleManager {
     }
 
     fn refresh_cache(&self, guild: GuildId) -> Result<()> {
-        let cache = self.get_rule_cache(guild)?;
+        let cache = self.0.rule_cache.read(&guild)?;
         self.update_cached_rules(&cache, guild, true)
     }
     pub fn set_active_role(
@@ -283,7 +289,7 @@ impl RoleManager {
         Ok(())
     }
     pub fn check_error(&self, guild: GuildId) -> Result<Option<String>> {
-        let lock = self.get_rule_cache(guild)?;
+        let lock = self.0.rule_cache.read(&guild)?;
         self.update_cached_rules(&lock, guild, false)?;
         let read = lock.read();
         Ok(match *read {
@@ -295,7 +301,7 @@ impl RoleManager {
     pub fn get_assigned_roles(
         &self, guild: GuildId, roblox_id: RobloxUserID
     ) -> Result<Vec<AssignedRole>> {
-        let lock = self.get_rule_cache(guild)?;
+        let lock = self.0.rule_cache.read(&guild)?;
         self.update_cached_rules(&lock, guild, false)?;
         let read = lock.read();
         Ok(match *read {
@@ -389,27 +395,22 @@ impl RoleManager {
         self.assign_roles(guild, discord_id, self.0.verifier.get_verified_roblox_user(discord_id)?)
     }
 
-    fn with_cooldown_cache<T, F>(
-        &self, guild_id: GuildId, user_id: UserId, is_manual: bool, f: F,
-    ) -> Result<T> where F: FnOnce(&mut Option<SystemTime>) -> Result<T> {
-        let cache =
-            self.0.update_cache.read(&guild_id, || Ok(Arc::new(ConcurrentCache::new())))?.clone();
-        let mut last_update = cache.write(&(user_id, is_manual), || {
-            self.0.database.connect()?.query_cached(
-                "SELECT last_updated FROM roles_last_updated \
-                 WHERE discord_guild_id = ?1 AND discord_user_id = ?2 AND is_manual = ?3",
-                (guild_id, user_id, is_manual)
-            ).get_opt::<SystemTime>()
-        })?;
-        f(&mut last_update)
+    fn get_cooldown_cache(
+        database: &Database, guild_id: GuildId, user_id: UserId, is_manual: bool,
+    ) -> Result<Option<SystemTime>> {
+        database.connect()?.query_cached(
+            "SELECT last_updated FROM roles_last_updated \
+             WHERE discord_guild_id = ?1 AND discord_user_id = ?2 AND is_manual = ?3",
+            (guild_id, user_id, is_manual)
+        ).get_opt::<SystemTime>()
     }
     pub fn update_user_with_cooldown(
         &self, guild_id: GuildId, user_id: UserId, cooldown: u64, is_manual: bool,
     ) -> Result<SetRolesStatus> {
         let now = SystemTime::now();
+        let guild_cache = self.0.update_cache.read(&guild_id)?;
         if cooldown != 0 {
-            let last_updated =
-                self.with_cooldown_cache(guild_id, user_id, is_manual, |x| Ok(*x))?;
+            let last_updated = *guild_cache.read(&(user_id, is_manual))?;
             if let Some(last_updated) = last_updated {
                 let cooldown_ends = last_updated + Duration::from_secs(cooldown);
                 if now < cooldown_ends {
@@ -433,15 +434,12 @@ impl RoleManager {
                 discord_guild_id, discord_user_id, is_manual, last_updated\
             ) VALUES (?1, ?2, ?3, ?4)", (guild_id, user_id, is_manual, now),
         )?;
-        self.with_cooldown_cache(guild_id, user_id, is_manual, |x| {
-            *x = Some(now);
-            Ok(())
-        })?;
+        *guild_cache.write(&(user_id, is_manual))? = Some(now);
         Ok(result)
     }
 
     pub fn explain_rule_set(&self, guild: GuildId) -> Result<String> {
-        let lock = self.get_rule_cache(guild)?;
+        let lock = self.0.rule_cache.read(&guild)?;
         self.update_cached_rules(&lock, guild, false)?;
         let read = lock.read();
         match *read {
@@ -449,6 +447,43 @@ impl RoleManager {
             VerificationRulesStatus::Error(ref err) => cmd_error!("Could not compile: {}", err),
             VerificationRulesStatus::NotCompiled => unimplemented!(),
         }
+    }
+    pub fn clear_rule_cache(&self) {
+        self.0.rule_cache.clear_cache()
+    }
+
+    pub fn check_roles_update_msg(&self, guild_id: GuildId, user_id: UserId) -> Result<()> {
+        let set_roles_on_join =
+            self.0.config.get(None, ConfigKeys::AllowEnableAutoUpdate)? &&
+            self.0.config.get(Some(guild_id), ConfigKeys::EnableAutoUpdate)?;
+        if set_roles_on_join {
+            let auto_update_cooldown = max(
+                self.0.config.get(None, ConfigKeys::MinimumAutoUpdateCooldownSeconds)?,
+                self.0.config.get(Some(guild_id), ConfigKeys::AutoUpdateCooldownSeconds)?
+            );
+            let roles = self.clone();
+            self.0.tasks.dispatch_task(move |_| {
+                roles.update_user_with_cooldown(
+                    guild_id, user_id, auto_update_cooldown, false
+                ).cmd_ok()?;
+                Ok(())
+            })
+        }
+        Ok(())
+    }
+    pub fn check_roles_update_join(&self, guild_id: GuildId, member: Member) -> Result<()> {
+        let set_roles_on_join =
+            self.0.config.get(None, ConfigKeys::AllowSetRolesOnJoin)? &&
+            self.0.config.get(Some(guild_id), ConfigKeys::SetRolesOnJoin)?;
+        if set_roles_on_join {
+            let roles = self.clone();
+            let user_id = member.user.read().id;
+            self.0.tasks.dispatch_task(move |_| {
+                roles.update_user_with_cooldown(guild_id, user_id, 0, false).cmd_ok()?;
+                Ok(())
+            })
+        }
+        Ok(())
     }
 
     pub fn on_cleanup_tick(&self) {
@@ -463,8 +498,5 @@ impl RoleManager {
     pub fn on_guild_remove(&self, guild: GuildId) {
         self.0.rule_cache.remove(&guild);
         self.0.update_cache.remove(&guild);
-    }
-    pub fn clear_rule_cache(&self) {
-        self.0.rule_cache.clear_cache()
     }
 }

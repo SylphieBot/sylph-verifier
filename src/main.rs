@@ -8,6 +8,9 @@
 // TODO: Clean up program thread usage
 // TODO: Pass around IDs less to touch Serenity's cache less.
 // TODO: Add statistics tracking to better understand current bot load.
+// TODO: Handle certain non-fatal errors like Discord permission issues better.
+// TODO: Restrict commands that can be used in verification channels.
+// TODO: Clear verification channels on startup.
 
 extern crate backtrace;
 extern crate byteorder;

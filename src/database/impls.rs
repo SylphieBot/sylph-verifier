@@ -63,6 +63,11 @@ impl FromSql for usize {
         <isize as FromSql>::from_sql(value).map(|x| x as usize)
     }
 }
+impl FromSql for ChannelId {
+    fn from_sql(value: ValueRef) -> Result<Self> {
+        Ok(ChannelId(u64::from_sql(value)?))
+    }
+}
 impl FromSql for UserId {
     fn from_sql(value: ValueRef) -> Result<Self> {
         Ok(UserId(u64::from_sql(value)?))
@@ -76,6 +81,11 @@ impl FromSql for GuildId {
 impl FromSql for RoleId {
     fn from_sql(value: ValueRef) -> Result<Self> {
         Ok(RoleId(u64::from_sql(value)?))
+    }
+}
+impl FromSql for MessageId {
+    fn from_sql(value: ValueRef) -> Result<Self> {
+        Ok(MessageId(u64::from_sql(value)?))
     }
 }
 impl FromSql for RobloxUserID {
@@ -128,6 +138,11 @@ impl ToSql for usize {
         Ok(Value::Integer(*self as i64).into())
     }
 }
+impl ToSql for ChannelId {
+    fn to_sql(&self) -> Result<ToSqlOutput> {
+        self.0.to_sql()
+    }
+}
 impl ToSql for UserId {
     fn to_sql(&self) -> Result<ToSqlOutput> {
         self.0.to_sql()
@@ -139,6 +154,11 @@ impl ToSql for GuildId {
     }
 }
 impl ToSql for RoleId {
+    fn to_sql(&self) -> Result<ToSqlOutput> {
+        self.0.to_sql()
+    }
+}
+impl ToSql for MessageId {
     fn to_sql(&self) -> Result<ToSqlOutput> {
         self.0.to_sql()
     }

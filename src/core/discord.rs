@@ -3,24 +3,29 @@ use core::CoreRef;
 use core::config::*;
 use core::roles::*;
 use core::tasks::*;
+use core::verification_channel::*;
 use errors::*;
 use error_report;
 use parking_lot::{Mutex, RwLock};
+use serenity;
 use serenity::Client;
 use serenity::client::bridge::gateway::ShardManager;
 use serenity::model::prelude::*;
 use serenity::prelude::*;
 use std::borrow::Cow;
-use std::cmp::max;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;
+use std::time::Duration;
 use util;
+
+// TODO: Check messages in verification channels on login.
 
 struct DiscordContext<'a> {
     ctx: Context, message: &'a Message, content: &'a str, prefix: String,
     privilege_level: PrivilegeLevel, command_target: CommandTarget, command_no: usize,
+    is_verification_channel: bool, delete_in: u32, tasks: TaskManager,
 }
 impl <'a> CommandContextData for DiscordContext<'a> {
     fn privilege_level(&self) -> PrivilegeLevel {
@@ -39,13 +44,25 @@ impl <'a> CommandContextData for DiscordContext<'a> {
         for line in message.split('\n') {
             debug!(target: "$raw", "[Command #{}] {}", self.command_no, line);
         }
-        self.message.channel_id.send_message(|m|
+        let verify_tail = if self.is_verification_channel {
+            format!("\n*This message will be deleted automatically in {}.*",
+                    util::to_english_time(self.delete_in as u64))
+        } else {
+            String::new()
+        };
+        let message = self.message.channel_id.send_message(|m|
             if message.contains('\n') {
-                m.content(format_args!("<@{}>\n{}", self.message.author.id, message))
+                m.content(format_args!("<@{}>\n{}{}", self.message.author.id, message, verify_tail))
             } else {
-                m.content(format_args!("<@{}> {}", self.message.author.id, message))
+                m.content(format_args!("<@{}> {}{}", self.message.author.id, message, verify_tail))
             }
         )?;
+        if self.is_verification_channel {
+            self.tasks.dispatch_delayed_task(Duration::from_secs(self.delete_in as u64), move |_| {
+                message.delete()?;
+                Ok(())
+            })
+        }
         Ok(())
     }
     fn discord_context(&self) -> Option<(&Context, &Message)> {
@@ -59,102 +76,118 @@ const STATUS_RUNNING : u8 = 2;
 const STATUS_SHUTDOWN: u8 = 3;
 const STATUS_DROPPED : u8 = 4;
 
+struct CommandMutexGuard(Arc<Mutex<HashSet<UserId>>>, UserId);
+impl Drop for CommandMutexGuard {
+    fn drop(&mut self) {
+        self.0.lock().remove(&self.1);
+    }
+}
+
+#[derive(Clone)]
+struct CommandMutex(Arc<Mutex<HashSet<UserId>>>);
+impl CommandMutex {
+    fn lock(&self, id: UserId) -> Option<CommandMutexGuard> {
+        let mut lock = self.0.lock();
+        if lock.contains(&id) {
+            None
+        } else {
+            lock.insert(id);
+            Some(CommandMutexGuard(self.0.clone(), id))
+        }
+    }
+
+    fn shrink_to_fit(&self) {
+        self.0.lock().shrink_to_fit();
+    }
+}
+
 struct DiscordBotSharedData {
     config: ConfigManager, core_ref: CoreRef, roles: RoleManager, tasks: TaskManager,
-    is_in_command: Arc<Mutex<HashSet<UserId>>>,
+    verify_channel: VerificationChannelManager, is_in_command: CommandMutex,
 }
 
 struct Handler {
-    user_prefix: RwLock<Option<String>>, shared: Arc<DiscordBotSharedData>, status: Arc<AtomicU8>,
+    shared: Arc<DiscordBotSharedData>, status: Arc<AtomicU8>,
 }
 impl Handler {
-    fn context_str(message: &Message) -> Cow<str> {
-        if let Some(channel) = message.channel() {
-            match channel {
-                Channel::Guild(channel) => {
-                    let channel = channel.read();
-                    if let Some(guild) = channel.guild() {
-                        let guild = guild.read();
-                        format!("{} (guild #{})", guild.name, guild.id).into()
-                    } else {
-                        format!("channel #{} in unknown guild", channel.id).into()
-                    }
+    fn context_str(channel: &Channel) -> Cow<str> {
+        match *channel {
+            Channel::Guild(ref channel) => {
+                let channel = channel.read();
+                if let Some(guild) = channel.guild() {
+                    let guild = guild.read();
+                    format!("{} (guild #{})", guild.name, guild.id).into()
+                } else {
+                    format!("channel #{} in unknown guild", channel.id).into()
                 }
-                Channel::Group(group) =>
-                    format!("group #{}", group.read().channel_id).into(),
-                Channel::Private(_) =>
-                    "DM".into(),
-                Channel::Category(category) =>
-                    format!("category #{}", category.read().id).into(),
             }
-        } else {
-            "unknown location".into()
+            Channel::Group(ref group) => format!("group #{}", group.read().channel_id).into(),
+            Channel::Private(_) => "DM".into(),
+            Channel::Category(ref category) => format!("category #{}", category.read().id).into(),
         }
     }
     fn message_info(
-        message: &Message, channel: Channel, bot_owner_id: Option<UserId>,
+        user_id: UserId, channel: &Channel, bot_owner_id: Option<UserId>,
     ) -> Result<(PrivilegeLevel, CommandTarget)> {
-        Ok(match channel {
-            Channel::Guild(channel) => {
+        Ok(match *channel {
+            Channel::Guild(ref channel) => {
                 let guild = channel.read().guild().chain_err(|| "Guild not found.")?;
                 let guild = guild.read();
                 let privilege =
-                    if Some(message.author.id) == bot_owner_id {
+                    if Some(user_id) == bot_owner_id {
                         PrivilegeLevel::BotOwner
-                    } else if message.author.id == guild.owner_id {
+                    } else if user_id == guild.owner_id {
                         PrivilegeLevel::GuildOwner
                     } else {
                         PrivilegeLevel::NormalUser
                     };
                 (privilege, CommandTarget::ServerMessage)
             }
-            Channel::Group(_) | Channel::Private(_) =>
+            Channel::Group(_) | Channel::Private(_) | Channel::Category(_) =>
                 (PrivilegeLevel::NormalUser, CommandTarget::PrivateMessage),
-            Channel::Category(_) => bail!("Received message in category channel."),
         })
     }
 
     fn start_command_thread(
-        &self, ctx: Context, message: Message,
+        &self, ctx: Context, message: Message, channel: Channel, guild_id: Option<GuildId>,
         content: String, command: &'static Command, prefix: String,
     ) -> Result<()> {
         let command_no = util::command_id();
-        let head = format!("{} in {}", message.author.tag(), Self::context_str(&message));
+        let head = format!("{} in {}", message.author.tag(), Self::context_str(&channel));
         debug!("Assigning ID #{} to command from {}: {:?}", command_no, head, message.content);
 
         let core_ref = self.shared.core_ref.clone();
         let bot_owner_id = self.shared.config.get(None, ConfigKeys::BotOwnerId)?.map(UserId);
         let is_in_command = self.shared.is_in_command.clone();
+
+        let (privilege_level, command_target) =
+            Self::message_info(message.author.id, &channel, bot_owner_id)?;
+        let (is_verification_channel, delete_in) = match guild_id {
+            Some(guild_id) => (
+                self.shared.verify_channel.is_verification_channel(guild_id, message.channel_id)?,
+                self.shared.config.get(Some(guild_id), ConfigKeys::VerificationChannelDeleteSeconds)?,
+            ),
+            None => (false, 0),
+        };
+        let tasks = self.shared.tasks.clone();
+
         thread::Builder::new().name(format!("command #{}", command_no)).spawn(move || {
             error_report::catch_error(move || {
-                if let Some(channel) = message.channel() {
-                    let (privilege_level, command_target) =
-                        Self::message_info(&message, channel, bot_owner_id)?;
-                    info!("{}: {}", head, message.content);
-                    let ctx = DiscordContext {
-                        ctx, message: &message, prefix, content: &content,
-                        privilege_level, command_target, command_no,
-                    };
-                    let no_command_running = {
-                        let mut is_in_command = is_in_command.lock();
-                        if is_in_command.contains(&message.author.id) {
-                            false
-                        } else {
-                            is_in_command.insert(message.author.id);
-                            true
-                        }
-                    };
-                    if no_command_running {
-                        core_ref.run_command(command, &ctx);
-                        is_in_command.lock().remove(&message.author.id);
-                    } else {
-                        ctx.respond(&format!(
-                            "<@{}> You are already running a command. Please wait for it \
-                             to finish running, then try again.", message.author.id,
-                        ))?;
-                    };
-                    debug!("Command #{} completed.", command_no);
-                }
+                info!("{}: {}", head, message.content);
+                let ctx = DiscordContext {
+                    ctx, message: &message, prefix, content: &content,
+                    privilege_level, command_target, command_no,
+                    is_verification_channel, delete_in, tasks,
+                };
+                if let Some(_lock) = is_in_command.lock(message.author.id) {
+                    core_ref.run_command(command, &ctx);
+                } else {
+                    ctx.respond(&format!(
+                        "<@{}> You are already running a command. Please wait for it \
+                         to finish running, then try again.", message.author.id,
+                    ))?;
+                };
+                debug!("Command #{} completed.", command_no);
                 Ok(())
             }).ok();
         })?;
@@ -164,6 +197,7 @@ impl Handler {
     fn on_guild_remove(&self, guild_id: GuildId) {
         self.shared.roles.on_guild_remove(guild_id);
         self.shared.config.on_guild_remove(guild_id);
+        self.shared.verify_channel.on_guild_remove(guild_id);
     }
 }
 impl Drop for Handler {
@@ -173,91 +207,60 @@ impl Drop for Handler {
     }
 }
 impl EventHandler for Handler {
-    fn ready(&self, _: Context, ready: Ready) {
-        *self.user_prefix.write() = Some(format!("<@{}> ", ready.user.id))
-    }
-
     fn message(&self, ctx: Context, message: Message) {
-        // Check for roles update
-        error_report::catch_error(|| {
-            let guild_id = if let Some(channel) = message.channel() {
-                match channel {
-                    Channel::Guild(channel) => {
-                        let guild = channel.read().guild().chain_err(|| "Guild not found.")?;
-                        let guild = guild.read();
-                        guild.id
-                    }
-                    _ => return Ok(()),
-                }
-            } else {
-                return Ok(())
-            };
+        let channel = match message.channel() {
+            Some(channel) => channel,
+            None => return,
+        };
+        let guild_id = match channel {
+            Channel::Guild(ref channel) => Some(channel.read().guild_id),
+            _ => None,
+        };
+        let user_id = serenity::CACHE.read().user.id;
 
-            let set_roles_on_join =
-                self.shared.config.get(None, ConfigKeys::AllowEnableAutoUpdate)? &&
-                self.shared.config.get(Some(guild_id), ConfigKeys::EnableAutoUpdate)?;
-            if set_roles_on_join {
-                let auto_update_cooldown = max(
-                    self.shared.config.get(None, ConfigKeys::MinimumAutoUpdateCooldownSeconds)?,
-                    self.shared.config.get(Some(guild_id), ConfigKeys::AutoUpdateCooldownSeconds)?
-                );
-                let shared = self.shared.clone();
-                let user_id = message.author.id;
-                self.shared.tasks.dispatch_task(move |_| {
-                    shared.roles.update_user_with_cooldown(
-                        guild_id, user_id, auto_update_cooldown, false
-                    ).cmd_ok()?;
-                    Ok(())
-                })
-            }
-            Ok(())
-        }).ok();
+        if let Some(guild_id) = guild_id {
+            error_report::catch_error(|| {
+                self.shared.roles.check_roles_update_msg(guild_id, message.author.id)?;
+                if message.author.id != user_id {
+                    self.shared.verify_channel.check_verification_channel_msg(guild_id, &message)?;
+                }
+                Ok(())
+            }).ok();
+        }
 
         // Process commands.
-        let prefix = error_report::catch_error(||
+        let prefix = match error_report::catch_error(||
             self.shared.config.get(None, ConfigKeys::CommandPrefix)
-        );
-        let prefix = match prefix {
+        ) {
             Ok(prefix) => prefix,
             Err(_) => return,
         };
 
         let content = if message.content.starts_with(&prefix) {
             Some(message.content[prefix.len()..].to_owned())
-        } else if let Some(user_prefix) = self.user_prefix.read().as_ref() {
-            if message.content.starts_with(user_prefix) {
+        } else {
+            let user_prefix = format!("<@{}> ", user_id);
+            if message.content.starts_with(&user_prefix) {
                 Some(message.content[user_prefix.len()..].to_owned())
             } else {
                 None
             }
-        } else {
-            None
         };
 
         if let Some(content) = content {
             if let Some(command) = get_command(&content) {
                 error_report::catch_error(||
-                    self.start_command_thread(ctx, message, content, command, prefix)
+                    self.start_command_thread(ctx, message, channel, guild_id,
+                                              content, command, prefix)
                 ).ok();
             }
         }
     }
 
     fn guild_member_addition(&self, _: Context, guild_id: GuildId, member: Member) {
-        error_report::catch_error(|| {
-            let set_roles_on_join =
-                self.shared.config.get(None, ConfigKeys::AllowSetRolesOnJoin)? &&
-                self.shared.config.get(Some(guild_id), ConfigKeys::SetRolesOnJoin)?;
-            if set_roles_on_join {
-                let shared = self.shared.clone();
-                let user_id = member.user.read().id;
-                self.shared.tasks.dispatch_task(move |_| {
-                    shared.roles.update_user_with_cooldown(guild_id, user_id, 0, false).cmd_ok()?;
-                    Ok(())
-                })
-            }
-            Ok(())
-        }).ok();
+        error_report::catch_error(||
+            self.shared.roles.check_roles_update_join(guild_id, member)
+        ).ok();
     }
 
     fn guild_delete(&self, _: Context, guild: PartialGuild, _: Option<Arc<RwLock<Guild>>>) {
@@ -284,9 +287,7 @@ impl DiscordBot {
                                              Ordering::Relaxed) == STATUS_NOT_INIT,
                 "Discord component already started!");
         let mut client = Client::new(&self.token, Handler {
-            user_prefix: RwLock::new(None),
-            shared: self.shared.clone(),
-            status: self.status.clone(),
+            shared: self.shared.clone(), status: self.status.clone(),
         })?;
         *self.shard_manager.lock() = Some(client.shard_manager.clone());
         ensure!(self.status.compare_and_swap(STATUS_STARTING, STATUS_RUNNING,
@@ -366,12 +367,13 @@ pub struct DiscordManager {
 impl DiscordManager {
     pub(in ::core) fn new(
         config: ConfigManager, core_ref: CoreRef, roles: RoleManager, tasks: TaskManager,
+        verify_channel: VerificationChannelManager,
     ) -> DiscordManager {
         DiscordManager {
             bot: Mutex::new(BotStatus::NotConnected), shutdown: AtomicBool::new(false),
             shared: Arc::new(DiscordBotSharedData {
-                config, core_ref, roles, tasks,
-                is_in_command: Arc::new(Mutex::new(HashSet::new())),
+                config, core_ref, roles, tasks, verify_channel,
+                is_in_command: CommandMutex(Arc::new(Mutex::new(HashSet::new()))),
             }),
         }
     }
@@ -407,6 +409,6 @@ impl DiscordManager {
     }
 
     pub fn on_cleanup_tick(&self) {
-        self.shared.is_in_command.lock().shrink_to_fit()
+        self.shared.is_in_command.shrink_to_fit()
     }
 }

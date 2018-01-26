@@ -9,6 +9,7 @@ use std::time::SystemTime;
 use util;
 
 // TODO: Check role existence.
+// TODO: Consider moving error messages back into roles.rs
 
 fn get_discord_username(discord_id: UserId) -> String {
     match discord_id.find() {
@@ -284,6 +285,42 @@ pub const COMMANDS: &[Command] = &[
               "Verifies a Roblox account to your Discord account.")
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(do_verify),
+    Command::new("set_verification_channel")
+        .help(None, "Makes the current channel a verification channel.")
+        .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
+        .required_permissions(enum_set!(DiscordPermission::ManageGuild |
+                                        DiscordPermission::ManageMessages))
+        .exec_discord(|ctx, _, msg| {
+            let guild_id = msg.guild_id().chain_err(|| "Guild ID not found.")?;
+            if let Some("confirm") = ctx.arg_opt(0) {
+                ctx.core.verify_channel().setup(guild_id, msg.channel_id)?;
+            } else {
+                ctx.core.verify_channel().setup_check(guild_id, msg.channel_id)?;
+                ctx.respond(format!(
+                    "You are setting this channel to be a verification channel. This will cause \
+                     the bot to:\n\
+                     • Delete all messages in this channel.\n\
+                     • Ignore commands other than those involved in verification in \
+                       this channel.\n\
+                     • Delete any messages sent by other users in this channel immediately \
+                       after receiving them.\n\
+                     • Automatically delete message sent by it in this channel after \
+                       a certain period of time.\n\
+                     \n\
+                     Please use `{}set_verification_channel confirm` to verify that you wish to \
+                     do this.", ctx.prefix(),
+                ))?;
+            }
+            Ok(())
+        }),
+    Command::new("remove_verification_channel")
+        .help(None, "Unsets the server's current verification channel, if one exists.")
+        .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
+        .required_permissions(enum_set!(DiscordPermission::ManageGuild |
+                                        DiscordPermission::ManageMessages))
+        .exec_discord(|ctx, _, msg| {
+            Ok(())
+        }),
     Command::new("explain")
         .help(Some("[rule to explain]"),
               "Explains the compilation of your ruleset or a role. You probably don't need this.")

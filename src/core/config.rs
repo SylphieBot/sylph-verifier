@@ -10,10 +10,6 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use util::ConcurrentCache;
 
-// TODO: Get rid of Clone here?
-// TODO: Prevent per-guild cache from growing indefinitely.
-// TODO: Consider minimizing ConfigCache size (probably not needed)
-
 pub struct ConfigKey<T: 'static> {
     enum_name: ConfigKeyName, _phantom: PhantomData<(fn(T), fn() -> T)>,
 }
@@ -241,6 +237,9 @@ config_keys! {
     VerificationAttemptLimit<u32>(10);
     VerificationCooldownSeconds<u64>(60 * 60 * 24);
 
+    VerificationChannelIntro<Option<String>>(None);
+    VerificationChannelDeleteSeconds<u32>(60);
+
     TokenValiditySeconds<u32>(60 * 5, |core| {
         core.verifier().rekey(false)?;
         core.refresh_place()?;
@@ -265,14 +264,14 @@ impl ConfigManager {
         ConfigManager(Arc::new(ConfigManagerData {
             database,
             global_cache: Arc::new(ConfigCache::new()),
-            guild_cache: ConcurrentCache::new(),
+            guild_cache: ConcurrentCache::new(|_| Ok(Arc::new(ConfigCache::new()))),
         }))
     }
 
     fn get_cache(&self, guild: Option<GuildId>) -> Result<Arc<ConfigCache>> {
         match guild {
             Some(guild) =>
-                Ok(self.0.guild_cache.read(&guild, || Ok(Arc::new(ConfigCache::new())))?.clone()),
+                Ok(self.0.guild_cache.read(&guild)?.clone()),
             None =>
                 Ok(self.0.global_cache.clone()),
         }

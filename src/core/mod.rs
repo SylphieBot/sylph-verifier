@@ -15,10 +15,12 @@ mod place;
 mod roles;
 mod tasks;
 mod terminal;
+mod verification_channel;
 mod verifier;
 
 pub use self::config::{ConfigManager, ConfigKey, ConfigKeys};
 pub use self::roles::{RoleManager, AssignedRole, ConfiguredRole, SetRolesStatus};
+pub use self::verification_channel::VerificationChannelManager;
 pub use self::verifier::{Verifier, VerifyResult, TokenStatus, RekeyReason};
 
 use self::discord::DiscordManager;
@@ -35,6 +37,7 @@ struct VerifierCoreData {
     _database: Database, config: ConfigManager, core_ref: CoreRef,
     terminal: Terminal, verifier: Verifier, discord: DiscordManager,
     place: PlaceManager, roles: RoleManager, _tasks: TaskManager,
+    verify_channel: VerificationChannelManager,
 }
 
 struct CoreRefActiveGuard<'a>(&'a CoreRef);
@@ -89,18 +92,20 @@ impl VerifierCore {
 
         let tasks = TaskManager::new(core_ref.clone())?;
         let terminal = Terminal::new(core_ref.clone())?;
+        let verify_channel = VerificationChannelManager::new(config.clone(), database.clone());
         let verifier = Verifier::new(config.clone(), database.clone())?;
         let place = PlaceManager::new(place_target)?;
-        let roles = RoleManager::new(config.clone(), database.clone(), verifier.clone());
-        let discord = DiscordManager::new(config.clone(), core_ref.clone(),
-                                          roles.clone(), tasks.clone());
+        let roles = RoleManager::new(config.clone(), database.clone(), verifier.clone(),
+                                     tasks.clone());
+        let discord = DiscordManager::new(config.clone(), core_ref.clone(), roles.clone(),
+                                          tasks.clone(), verify_channel.clone());
 
         tasks.dispatch_repeating_task(Duration::from_secs(60 * 10), |core| core.cleanup());
 
         Ok(VerifierCore(Arc::new(VerifierCoreData {
             status: AtomicU8::new(STATUS_STOPPED),
             _database: database, _tasks: tasks,
-            config, core_ref, terminal, verifier, discord, place, roles,
+            config, core_ref, terminal, verifier, discord, place, roles, verify_channel,
         })))
     }
 
@@ -109,6 +114,7 @@ impl VerifierCore {
         self.0.config.on_cleanup_tick();
         self.0.discord.on_cleanup_tick();
         self.0.roles.on_cleanup_tick();
+        self.0.verify_channel.on_cleanup_tick();
         Ok(())
     }
     fn wait_on_instances(&self) {
@@ -170,6 +176,9 @@ impl VerifierCore {
     }
     pub fn discord(&self) -> &DiscordManager {
         &self.0.discord
+    }
+    pub fn verify_channel(&self) -> &VerificationChannelManager {
+        &self.0.verify_channel
     }
 
     pub fn refresh_place(&self) -> Result<()> {

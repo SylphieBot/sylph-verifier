@@ -6,13 +6,14 @@ use util;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 enum GuildShowType {
-    AlwaysShow, OnlyInTerminal, AlwaysHidden,
+    AlwaysShow, OnlyInTerminal, OnlyInGuild, AlwaysHidden,
 }
 impl GuildShowType {
     fn show_in(self, guild: Option<GuildId>) -> bool {
         match self {
             GuildShowType::AlwaysShow     => true,
             GuildShowType::OnlyInTerminal => guild.is_none(),
+            GuildShowType::OnlyInGuild    => guild.is_some(),
             GuildShowType::AlwaysHidden   => false,
         }
     }
@@ -209,7 +210,7 @@ config_values! {
         PlaceID, false, |_| Ok(GuildShowType::OnlyInTerminal),
         "The ID of the verification place. This is displayed in verification channel messages.",
         |x| parse_u64(x).map(Some),
-        |_, x| Ok(x.map_or_else(|| "(none_set)".to_owned(), |x| format!("{}", x))));
+        |_, x| Ok(x.map_or_else(|| "*(none set)*".to_owned(), |x| format!("{}", x))));
 
     verification_attempt_limit<u32>(
         VerificationAttemptLimit, false, |_| Ok(GuildShowType::OnlyInTerminal),
@@ -219,6 +220,21 @@ config_values! {
         VerificationCooldownSeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),
         "How many seconds a user must wait to attempt to verify after using up the attempt limit.",
         parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
+
+    verification_channel_intro<Option<String>>(
+        VerificationChannelIntro, true, |_| Ok(GuildShowType::OnlyInGuild),
+        "A sentence that you can add to the start of your server's verification message.",
+        |x| Ok(Some(x.to_owned())),
+        |_, x| Ok(x.map_or_else(|| "*(none set)*".to_owned(), |x| format!("\"{}\"", x))));
+    VerificationChannelDeleteSeconds<u32>(
+        VerificationChannelDeleteSeconds, true, |_| Ok(GuildShowType::OnlyInGuild),
+        "How many seconds to wait before deleting responses in a verification channel.",
+        |x| {
+            let secs = parse_u32(x)?;
+            cmd_ensure!(secs < 60 * 5, "Maximum delete wait is 5 minutes.");
+            Ok(secs)
+        },
+        |_, x| Ok(util::to_english_time_precise(x as u64)));
 
     token_validity<u32>(
         TokenValiditySeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),
