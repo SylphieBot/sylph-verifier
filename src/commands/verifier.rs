@@ -299,7 +299,7 @@ pub const COMMANDS: &[Command] = &[
                 ctx.respond(format!(
                     "You are setting this channel to be a verification channel. This will cause \
                      the bot to:\n\
-                     • Delete all messages in this channel.\n\
+                     • Delete all messages currently in in this channel.\n\
                      • Ignore commands other than those involved in verification in \
                        this channel.\n\
                      • Delete any messages sent by other users in this channel immediately \

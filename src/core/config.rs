@@ -238,7 +238,7 @@ config_keys! {
     VerificationCooldownSeconds<u64>(60 * 60 * 24);
 
     VerificationChannelIntro<Option<String>>(None);
-    VerificationChannelDeleteSeconds<u32>(60);
+    VerificationChannelDeleteSeconds<u32>(30);
 
     TokenValiditySeconds<u32>(60 * 5, |core| {
         core.verifier().rekey(false)?;

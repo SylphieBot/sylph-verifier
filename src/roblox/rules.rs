@@ -694,13 +694,15 @@ impl VerificationSet {
                     }
                 },
                 RuleOp::Literal(b) => state.push(b),
-                RuleOp::StartSkip(skip_if, skip_result, skip_id) =>
-                    if state.pop() == skip_if {
+                RuleOp::StartSkip(skip_if, skip_result, skip_id) => {
+                    let current = state.pop();
+                    if current == skip_if {
                         ip = self.skips[skip_id];
                         state.push(skip_result);
                     } else {
-                        state.push(skip_if);
-                    },
+                        state.push(current);
+                    }
+                },
                 RuleOp::Operator(_, op) => {
                     let val = match op {
                         Operator::Not => !state.pop(),

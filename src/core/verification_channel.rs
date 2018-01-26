@@ -71,7 +71,7 @@ impl VerificationChannelManager {
                           the account you want to verify as.\n\
                         • Enter the command displayed in the oval box there into this channel.\n\
                         • Your roles will be set according to your Roblox account. If they are \
-                          not, please contact the server operators.",
+                          not, please contact the server admins.",
                        verify_intro.unwrap_or_else(|| String::new()), space,
                        place_id))
         } else {
