@@ -226,7 +226,7 @@ config_values! {
         "A sentence that you can add to the start of your server's verification message.",
         |x| Ok(Some(x.to_owned())),
         |_, x| Ok(x.map_or_else(|| "*(none set)*".to_owned(), |x| format!("\"{}\"", x))));
-    VerificationChannelDeleteSeconds<u32>(
+    verification_channel_delete_timer<u32>(
         VerificationChannelDeleteSeconds, true, |_| Ok(GuildShowType::OnlyInGuild),
         "How many seconds to wait before deleting responses in a verification channel.",
         |x| {
