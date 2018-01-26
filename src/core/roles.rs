@@ -332,7 +332,7 @@ impl RoleManager {
 
         let set_nickname = if can_access_user && do_set_nickname {
             let target_nickname = if let Some(roblox_id) = roblox_id {
-                Some(roblox_id.lookup_username()?)
+                Some(format!("{}\u{17B5}", roblox_id.lookup_username()?))
             } else {
                 None
             };

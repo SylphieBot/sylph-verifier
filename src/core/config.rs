@@ -227,9 +227,8 @@ config_keys! {
     PlaceUITitle<String>("Roblox Account Verifier".to_owned(), |core| core.refresh_place());
     PlaceUIInstructions<String>(
         "To verify your Roblox account with this server, please enter the following \
-         command on the server.".to_owned(),
-         |core| core.refresh_place()
-    );
+         command on it.".to_owned(),
+         |core| core.refresh_place());
     PlaceUIBackground<Option<String>>(None, |core| core.refresh_place());
     PlaceID<Option<u64>>(None);
 
