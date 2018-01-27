@@ -214,9 +214,9 @@ config_keys! {
     SetNickname<bool>(true);
 
     AllowSetRolesOnJoin<bool>(true);
-    SetRolesOnJoin<bool>(true);
+    SetRolesOnJoin<bool>(false);
     AllowEnableAutoUpdate<bool>(true);
-    EnableAutoUpdate<bool>(true);
+    EnableAutoUpdate<bool>(false);
 
     MinimumUpdateCooldownSeconds<u64>(60 * 60);
     UpdateCooldownSeconds<u64>(60 * 60);
