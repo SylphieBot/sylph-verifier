@@ -255,7 +255,7 @@ impl <'a> CommandContext<'a> {
     }
 
     fn catch_error<F, T>(&self, f: F) -> Result<T> where F: FnOnce() -> Result<T> {
-        match error_report::catch_error(|| match f() {
+        match error_report::catch_error(|| match f().discord_to_cmd() {
             Ok(v) => Ok(Ok(v)),
             Err(Error(box (ErrorKind::CommandError(err), _))) => {
                 self.respond(&err)?;

@@ -8,7 +8,7 @@ use util::ConcurrentCache;
 
 struct VerificationChannelManagerData {
     config: ConfigManager, database: Database,
-    verification_channel_cache: ConcurrentCache<GuildId, Option<(ChannelId, MessageId)>>,
+    channel_cache: ConcurrentCache<GuildId, Option<(ChannelId, MessageId)>>,
 }
 
 #[derive(Clone)]
@@ -18,7 +18,7 @@ impl VerificationChannelManager {
         let db_ref_update = database.clone();
         VerificationChannelManager(Arc::new(VerificationChannelManagerData {
             config, database,
-            verification_channel_cache: ConcurrentCache::new(move |&guild_id| {
+            channel_cache: ConcurrentCache::new(move |&guild_id| {
                 Self::get_verification_channel(&db_ref_update, guild_id)
             }),
         }))
@@ -35,7 +35,7 @@ impl VerificationChannelManager {
     pub fn is_verification_channel(
         &self, guild_id: GuildId, channel_id: ChannelId
     ) -> Result<bool> {
-        Ok(self.0.verification_channel_cache.read(&guild_id)?.map(|x| x.0) == Some(channel_id))
+        Ok(self.0.channel_cache.read(&guild_id)?.map(|x| x.0) == Some(channel_id))
     }
     fn set_verification_channel(
         &self, guild_id: GuildId, channel_id: ChannelId, message_id: MessageId,
@@ -45,7 +45,7 @@ impl VerificationChannelManager {
                  discord_guild_id, discord_channel_id, header_message_id\
              ) VALUES (?1, ?2, ?3)", (guild_id, channel_id, message_id),
         )?;
-        *self.0.verification_channel_cache.write(&guild_id)? = Some((channel_id, message_id));
+        *self.0.channel_cache.write(&guild_id)? = Some((channel_id, message_id));
         Ok(())
     }
 
@@ -54,6 +54,44 @@ impl VerificationChannelManager {
     ) -> Result<()> {
         if self.is_verification_channel(guild_id, message.channel_id)? {
             message.delete()?;
+        }
+        Ok(())
+    }
+
+    fn remove_messages(&self, channel_id: ChannelId, ignore: Option<MessageId>) -> Result<()> {
+        let mut tries = 0;
+        loop {
+            let messages = channel_id.messages(|x| x.limit(100))?;
+            if messages.len() == 0 {
+                break
+            }
+            channel_id.delete_messages(
+                messages.iter().filter(|x| Some(x.id) != ignore).map(|x| x.id)
+            )?;
+            tries += 1;
+            cmd_ensure!(tries < 5, "Could not delete all messages in 5 tries.");
+        }
+        Ok(())
+    }
+    fn delete_old_messages(
+        &self, guild_id: GuildId,
+    ) -> Result<()> {
+        if let Some((channel_id, message_id)) = *self.0.channel_cache.read(&guild_id)? {
+            self.remove_messages(channel_id, Some(message_id))?;
+        }
+        Ok(())
+    }
+    pub fn check_verification_channels_ready(
+        &self, ready: &Ready,
+    ) -> Result<()> {
+        for guild in &ready.guilds {
+            match *guild {
+                GuildStatus::OnlineGuild(ref guild) =>
+                    self.delete_old_messages(guild.id).discord_to_cmd().cmd_ok()?,
+                GuildStatus::OnlinePartialGuild(ref guild) =>
+                    self.delete_old_messages(guild.id).discord_to_cmd().cmd_ok()?,
+                _ => { }
+            }
         }
         Ok(())
     }
@@ -98,17 +136,7 @@ impl VerificationChannelManager {
     }
     pub fn setup(&self, guild_id: GuildId, channel_id: ChannelId) -> Result<()> {
         self.setup_check(guild_id, channel_id)?;
-
-        let mut tries = 0;
-        loop {
-            let messages = channel_id.messages(|x| x.limit(100))?;
-            if messages.len() == 0 {
-                break
-            }
-            channel_id.delete_messages(messages.iter().map(|x| x.id))?;
-            tries += 1;
-            cmd_ensure!(tries < 5, "Could not delete all messages in 5 tries.");
-        }
+        self.remove_messages(channel_id, None)?;
 
         let message_text = self.intro_message(guild_id)?;
         let message = channel_id.send_message(|x| x.content(message_text))?;
@@ -118,9 +146,9 @@ impl VerificationChannelManager {
     }
 
     pub fn on_cleanup_tick(&self) {
-        self.0.verification_channel_cache.shrink_to_fit();
+        self.0.channel_cache.shrink_to_fit();
     }
     pub fn on_guild_remove(&self, guild: GuildId) {
-        self.0.verification_channel_cache.remove(&guild);
+        self.0.channel_cache.remove(&guild);
     }
 }

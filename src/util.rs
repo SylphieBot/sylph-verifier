@@ -145,7 +145,7 @@ pub fn sprunge(text: &str) -> Result<String> {
     Ok(result.text()?.trim().to_string())
 }
 
-// TODO: Wait for these to be added to Serenity.
+// TODO: Wait for Serenity's heirarchy functions to account for owners/etc.
 #[derive(Ord, PartialOrd, Eq, PartialEq)]
 enum RolePosition {
     Nobody, Role(i64), GuildOwner,

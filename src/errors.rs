@@ -1,5 +1,10 @@
 #![allow(non_camel_case_types)]
 
+use hyper::status::StatusCode;
+use serenity::{Error as SerenityError};
+use serenity::model::prelude::*;
+use serenity::prelude::*;
+use std::borrow::Cow;
 use std::error;
 use std::fmt;
 
@@ -22,7 +27,7 @@ mod internal {
         }
 
         errors {
-            CommandError(err: String) {
+            CommandError(err: std::borrow::Cow<'static, str>) {
                 description("command encountered an error")
                 display("{}", err)
             }
@@ -61,23 +66,25 @@ impl Error {
 
 macro_rules! cmd_error {
     ($err:expr $(,)*) => {
-        bail!($crate::errors::ErrorKind::CommandError(format!("{}", $err)))
+        bail!($crate::errors::ErrorKind::CommandError($err.into()))
     };
     ($err:expr, $($arg:expr),* $(,)*) => {
-        bail!($crate::errors::ErrorKind::CommandError(format!($err, $($arg,)*)))
+        bail!($crate::errors::ErrorKind::CommandError(format!($err, $($arg,)*).into()))
     };
 }
 macro_rules! cmd_ensure {
     ($cond:expr, $err:expr $(,)*) => {
-        ensure!($cond, $crate::errors::ErrorKind::CommandError(format!("{}", $err)))
+        ensure!($cond, $crate::errors::ErrorKind::CommandError($err.into()))
     };
     ($cond:expr, $err:expr, $($arg:expr),* $(,)*) => {
-        ensure!($cond, $crate::errors::ErrorKind::CommandError(format!($err, $($arg,)*)))
+        ensure!($cond, $crate::errors::ErrorKind::CommandError(format!($err, $($arg,)*).into()))
     };
 }
 
+
 pub trait ResultCmdExt<T> {
     fn cmd_ok(self) -> Result<()>;
+    fn discord_to_cmd(self) -> Result<T>;
 }
 impl <T> ResultCmdExt<T> for Result<T> {
     fn cmd_ok(self) -> Result<()> {
@@ -86,13 +93,44 @@ impl <T> ResultCmdExt<T> for Result<T> {
             Err(e) => Err(e),
         }
     }
+    fn discord_to_cmd(self) -> Result<T> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(Error(box (ErrorKind::Serenity(
+                SerenityError::Model(ModelError::Hierarchy)
+            ), _))) => cmd_error!(
+                "The bot's role does not have sufficient rank in the hierarchy to do that. Please \
+                 ensure that it has a role with a greater rank than all roles it needs to manage."
+            ),
+            Err(Error(box (ErrorKind::Serenity(
+                SerenityError::Model(ModelError::InvalidPermissions(_))
+            ), _))) => cmd_error!(
+                "The bot does not have sufficient permissions to do that. Please check that: \n\
+                 • It has the permissions it requires: Manage Roles, Manage Nicknames, \
+                   Read Messages, Send Messages, Manage Messages, Read Message History\n\
+                 • There is no per-channel permissions overwrites preventing it from using \
+                   those permissions on this channel."
+            ),
+            Err(Error(box (ErrorKind::Serenity(
+                SerenityError::Http(HttpError::UnsuccessfulRequest(ref res))
+            ), _))) if res.status == StatusCode::Forbidden => cmd_error!(
+                "The bot has encountered an unknown permissions error. Please check that:\n\
+                 • It has the permissions it requires: Manage Roles, Manage Nicknames, \
+                   Read Messages, Send Messages, Manage Messages, Read Message History\n\
+                 • There is no per-channel permissions overwrites preventing it from using \
+                   those permissions on this channel.
+                 • It has a role with a greater rank than all roles it needs to manage."
+            ),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 pub trait IntoResultCmdExt<T> {
-    fn to_cmd_err<F, R: Into<String>>(self, f: F) -> Result<T> where F: FnOnce() -> R;
+    fn to_cmd_err<F, R: Into<Cow<'static, str>>>(self, f: F) -> Result<T> where F: FnOnce() -> R;
 }
 impl <T, E: ResultExt<T>> IntoResultCmdExt<T> for E {
-    fn to_cmd_err<F, R: Into<String>>(self, f: F) -> Result<T> where F: FnOnce() -> R {
+    fn to_cmd_err<F, R: Into<Cow<'static, str>>>(self, f: F) -> Result<T> where F: FnOnce() -> R {
         self.chain_err(|| ErrorKind::CommandError(f().into()))
     }
 }

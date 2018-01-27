@@ -6,6 +6,7 @@ use errors::*;
 use parking_lot::RwLock;
 use serenity;
 use serenity::model::prelude::*;
+use std::borrow::Cow;
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::mem::drop;
@@ -17,7 +18,7 @@ use util::ConcurrentCache;
 
 enum VerificationRulesStatus {
     NotCompiled,
-    Error(String),
+    Error(Cow<'static, str>),
     Compiled(VerificationSet, HashMap<String, RoleId>),
 }
 impl VerificationRulesStatus {
@@ -120,7 +121,7 @@ impl RoleManager {
                     "Too many roles are configured to be assigned. \
                      ({} roles are active, maximum is {}.)",
                     active_count, max_assigned
-                )))
+                ).into()))
             }
 
             let max_custom = self.0.config.get(None, ConfigKeys::RolesMaxCustomRules)?;
@@ -129,7 +130,7 @@ impl RoleManager {
                     "Too many custom roles exist. \
                      ({} custom roles exist, maximum is {}.)",
                     custom_count, max_custom
-                )))
+                ).into()))
             }
         }
 
@@ -151,7 +152,8 @@ impl RoleManager {
                     if set.instruction_count() > max_instructions as usize {
                         return Ok(VerificationRulesStatus::Error(format!(
                             "Role configuration is too complex. (Complexity is {}, maximum is {}.)",
-                            set.instruction_count(), max_instructions)))
+                            set.instruction_count(), max_instructions
+                        ).into()))
                     }
 
                     let web_requests = set.max_web_requests();
@@ -162,7 +164,7 @@ impl RoleManager {
                             "Role configuration makes to many web requests. \
                              (Configuration makes {} web requests, maximum is {}.)",
                             web_requests, max_web_requests
-                        )))
+                        ).into()))
                     }
                 }
 
@@ -288,7 +290,7 @@ impl RoleManager {
         self.refresh_cache(guild)?;
         Ok(())
     }
-    pub fn check_error(&self, guild: GuildId) -> Result<Option<String>> {
+    pub fn check_error(&self, guild: GuildId) -> Result<Option<Cow<'static, str>>> {
         let lock = self.0.rule_cache.read(&guild)?;
         self.update_cached_rules(&lock, guild, false)?;
         let read = lock.read();
@@ -465,7 +467,7 @@ impl RoleManager {
             self.0.tasks.dispatch_task(move |_| {
                 roles.update_user_with_cooldown(
                     guild_id, user_id, auto_update_cooldown, false
-                ).cmd_ok()?;
+                ).discord_to_cmd().cmd_ok()?;
                 Ok(())
             })
         }
@@ -479,7 +481,9 @@ impl RoleManager {
             let roles = self.clone();
             let user_id = member.user.read().id;
             self.0.tasks.dispatch_task(move |_| {
-                roles.update_user_with_cooldown(guild_id, user_id, 0, false).cmd_ok()?;
+                roles.update_user_with_cooldown(
+                    guild_id, user_id, 0, false
+                ).discord_to_cmd().cmd_ok()?;
                 Ok(())
             })
         }

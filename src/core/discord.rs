@@ -211,12 +211,15 @@ impl EventHandler for Handler {
         if !self.printed_url.compare_and_swap(false, true, Ordering::Relaxed) {
             let permissions = Permissions::MANAGE_ROLES | Permissions::MANAGE_NICKNAMES |
                               Permissions::READ_MESSAGES | Permissions::SEND_MESSAGES |
-                              Permissions::MANAGE_MESSAGES | Permissions::EMBED_LINKS |
-                              Permissions::READ_MESSAGE_HISTORY;
+                              Permissions::MANAGE_MESSAGES | Permissions::READ_MESSAGE_HISTORY;
             info!("Add bot link: \
                    https://discordapp.com/oauth2/authorize?client_id={}&permissions={}&scope=bot",
                   ready.user.id, permissions.bits());
         }
+
+        error_report::catch_error(||
+            self.shared.verify_channel.check_verification_channels_ready(&ready)
+        ).ok();
     }
 
     fn message(&self, ctx: Context, message: Message) {

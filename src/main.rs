@@ -19,6 +19,7 @@ extern crate chrono;
 extern crate constant_time_eq;
 extern crate fs2;
 extern crate hmac;
+extern crate hyper;
 extern crate linefeed;
 extern crate num_cpus;
 extern crate parking_lot;

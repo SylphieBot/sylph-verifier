@@ -218,9 +218,9 @@ pub const COMMANDS: &[Command] = &[
                     if !util::can_member_access_role(&sender_member, role_id)? {
                         cmd_error!("You do not have permission to modify that role.")
                     }
-                    if !util::can_member_access_role(&me_member, role_id)? {
-                        cmd_error!("This bot does not have permission to modify that role.")
-                    }
+                }
+                if !util::can_member_access_role(&me_member, role_id)? {
+                    cmd_error!("This bot does not have permission to modify that role.")
                 }
                 ctx.core.roles().set_active_role(guild_id, rule_name, Some(role_id))?;
             } else {
