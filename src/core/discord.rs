@@ -107,7 +107,7 @@ struct DiscordBotSharedData {
 }
 
 struct Handler {
-    shared: Arc<DiscordBotSharedData>, status: Arc<AtomicU8>,
+    shared: Arc<DiscordBotSharedData>, status: Arc<AtomicU8>, printed_url: AtomicBool,
 }
 impl Handler {
     fn context_str(channel: &Channel) -> Cow<str> {
@@ -207,6 +207,18 @@ impl Drop for Handler {
     }
 }
 impl EventHandler for Handler {
+    fn ready(&self, _: Context, ready: Ready) {
+        if !self.printed_url.compare_and_swap(false, true, Ordering::Relaxed) {
+            let permissions = Permissions::MANAGE_ROLES | Permissions::MANAGE_NICKNAMES |
+                              Permissions::READ_MESSAGES | Permissions::SEND_MESSAGES |
+                              Permissions::MANAGE_MESSAGES | Permissions::EMBED_LINKS |
+                              Permissions::READ_MESSAGE_HISTORY;
+            info!("Add bot link: \
+                   https://discordapp.com/oauth2/authorize?client_id={}&permissions={}&scope=bot",
+                  ready.user.id, permissions.bits());
+        }
+    }
+
     fn message(&self, ctx: Context, message: Message) {
         let channel = match message.channel() {
             Some(channel) => channel,
@@ -288,6 +300,7 @@ impl DiscordBot {
                 "Discord component already started!");
         let mut client = Client::new(&self.token, Handler {
             shared: self.shared.clone(), status: self.status.clone(),
+            printed_url: AtomicBool::new(false),
         })?;
         *self.shard_manager.lock() = Some(client.shard_manager.clone());
         ensure!(self.status.compare_and_swap(STATUS_STARTING, STATUS_RUNNING,
