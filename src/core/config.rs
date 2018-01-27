@@ -199,7 +199,7 @@ macro_rules! config_keys {
 
 config_keys! {
     // Discord settings
-    CommandPrefix<String>("!".to_owned());
+    CommandPrefix<String>("!".to_owned(), |core| core.refresh_place());
     DiscordToken<Option<String>>(None, |core| core.discord().reconnect());
     BotOwnerId<Option<u64>>(None);
 

@@ -62,28 +62,29 @@ impl VerificationChannelManager {
         let mut tries = 0;
         loop {
             let messages = channel_id.messages(|x| x.limit(100))?;
+            let messages: Vec<MessageId> =
+                messages.iter().filter(|x| Some(x.id) != ignore).map(|x| x.id).collect();
             if messages.len() == 0 {
                 break
             }
-            channel_id.delete_messages(
-                messages.iter().filter(|x| Some(x.id) != ignore).map(|x| x.id)
-            )?;
+            channel_id.delete_messages(messages)?;
             tries += 1;
             cmd_ensure!(tries < 5, "Could not delete all messages in 5 tries.");
         }
         Ok(())
     }
-    fn delete_old_messages(
-        &self, guild_id: GuildId,
-    ) -> Result<()> {
+    fn delete_old_messages(&self, guild_id: GuildId) -> Result<()> {
         if let Some((channel_id, message_id)) = *self.0.channel_cache.read(&guild_id)? {
+            trace!("Removing missed messages in verification channel for {}.", guild_id);
             self.remove_messages(channel_id, Some(message_id))?;
         }
         Ok(())
     }
-    pub fn check_verification_channels_ready(
-        &self, ready: &Ready,
-    ) -> Result<()> {
+
+    pub fn check_guild_create(&self, guild_id: GuildId) -> Result<()> {
+        self.delete_old_messages(guild_id).discord_to_cmd().cmd_ok()
+    }
+    pub fn check_verification_channels_ready(&self, ready: &Ready, ) -> Result<()> {
         for guild in &ready.guilds {
             match *guild {
                 GuildStatus::OnlineGuild(ref guild) =>

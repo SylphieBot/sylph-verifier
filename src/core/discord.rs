@@ -278,6 +278,11 @@ impl EventHandler for Handler {
         ).ok();
     }
 
+    fn guild_create(&self, _: Context, guild: Guild, _: bool) {
+        error_report::catch_error(||
+            self.shared.verify_channel.check_guild_create(guild.id)
+        ).ok();
+    }
     fn guild_delete(&self, _: Context, guild: PartialGuild, _: Option<Arc<RwLock<Guild>>>) {
         self.on_guild_remove(guild.id);
     }
