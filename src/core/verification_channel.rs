@@ -55,7 +55,7 @@ impl VerificationChannelManager {
         &self, guild_id: GuildId, message: &Message
     ) -> Result<()> {
         if self.is_verification_channel(guild_id, message.channel_id)? {
-            message.delete()?;
+            message.delete().map_err(Error::from).discord_to_cmd().cmd_ok()?;
         }
         Ok(())
     }

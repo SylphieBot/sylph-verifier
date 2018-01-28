@@ -20,8 +20,7 @@ use std::thread;
 use std::time::Duration;
 use util;
 
-// TODO: Tell users who talk in a verification channel what happened to their message?
-// TODO: Don't error if another bot deletes a message first.
+// TODO: Batch delete operations.
 
 struct DiscordContext<'a> {
     ctx: Context, message: &'a Message, content: &'a str, prefix: String,
@@ -60,8 +59,7 @@ impl <'a> CommandContextData for DiscordContext<'a> {
         )?;
         if self.is_verification_channel {
             self.tasks.dispatch_delayed_task(Duration::from_secs(self.delete_in as u64), move |_| {
-                message.delete()?;
-                Ok(())
+                message.delete().map_err(Error::from).discord_to_cmd().cmd_ok()
             })
         }
         Ok(())

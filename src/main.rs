@@ -8,7 +8,6 @@
 // TODO: Clean up program thread usage
 // TODO: Pass around IDs less to touch Serenity's cache less.
 // TODO: Add statistics tracking to better understand current bot load.
-// TODO: Restrict commands that can be used in verification channels.
 // TODO: Add logging for verifications to a log channel.
 // TODO: Find and handle bottlenecks.
 

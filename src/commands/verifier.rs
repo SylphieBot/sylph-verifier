@@ -10,7 +10,6 @@ use util;
 
 // TODO: Check role existence.
 // TODO: Consider moving error messages back into roles.rs
-// TODO: Suggest proper usage when people are using it wrong.
 // TODO: Support force updating an user.
 
 fn get_discord_username(discord_id: UserId) -> String {
@@ -308,8 +307,6 @@ pub const COMMANDS: &[Command] = &[
                     "You are setting this channel to be a verification channel. This will cause \
                      the bot to:\n\
                      • Delete all messages currently in in this channel.\n\
-                     • Ignore commands other than those involved in verification in \
-                       this channel.\n\
                      • Delete any messages sent by other users in this channel immediately \
                        after receiving them.\n\
                      • Automatically delete message sent by it in this channel after \
