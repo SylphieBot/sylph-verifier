@@ -11,6 +11,7 @@ use util;
 // TODO: Check role existence.
 // TODO: Consider moving error messages back into roles.rs
 // TODO: Suggest proper usage when people are using it wrong.
+// TODO: Support force updating an user.
 
 fn get_discord_username(discord_id: UserId) -> String {
     match discord_id.find() {
@@ -327,6 +328,7 @@ pub const COMMANDS: &[Command] = &[
     Command::new("explain")
         .help(Some("[rule to explain]"),
               "Explains the compilation of your ruleset or a role. You probably don't need this.")
+        .required_permissions(enum_set!(DiscordPermission::ManageRoles))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg| {
             let rule = ctx.rest(0)?;

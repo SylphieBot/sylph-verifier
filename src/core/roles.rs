@@ -16,6 +16,8 @@ use roblox::{VerificationSet, VerificationRule, RobloxUserID};
 use util;
 use util::ConcurrentCache;
 
+// TODO: Prevent assigning the same role id to two rules.
+
 enum VerificationRulesStatus {
     NotCompiled,
     Error(Cow<'static, str>),
@@ -310,9 +312,9 @@ impl RoleManager {
             VerificationRulesStatus::Compiled(ref rule_set, ref role_info) => {
                 let mut vec = Vec::new();
                 for (rule_name, is_assigned) in rule_set.verify(roblox_id)? {
-                    let discord_role_id = role_info[rule_name];
+                    let role_id = role_info[rule_name];
                     vec.push(AssignedRole {
-                        rule: rule_name.to_string(), role_id: discord_role_id, is_assigned,
+                        rule: rule_name.to_string(), role_id, is_assigned,
                     })
                 }
                 vec
