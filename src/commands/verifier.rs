@@ -319,6 +319,8 @@ pub const COMMANDS: &[Command] = &[
         .required_permissions(enum_set!(DiscordPermission::ManageGuild |
                                         DiscordPermission::ManageMessages))
         .exec_discord(|ctx, _, msg| {
+            let guild_id = msg.guild_id().chain_err(|| "Guild ID not found.")?;
+            ctx.core.verify_channel().remove(guild_id)?;
             Ok(())
         }),
     Command::new("explain")

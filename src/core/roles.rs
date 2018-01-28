@@ -70,12 +70,12 @@ impl RoleManager {
         &self, conn: &DatabaseConnection, guild: GuildId
     ) -> Result<(HashMap<String, ConfiguredRole>, usize, usize)> {
         // We don't have FULL OUTER JOIN in sqlite, so, we improvise a bit.
-        let active_rules_list = conn.query_cached(
+        let active_rules_list = conn.query(
             "SELECT rule_name, discord_role_id, last_updated \
              FROM guild_active_rules \
              WHERE discord_guild_id = ?1", guild
         ).get_all::<(String, RoleId, SystemTime)>()?;
-        let custom_rules_list = conn.query_cached(
+        let custom_rules_list = conn.query(
             "SELECT rule_name, condition, last_updated \
              FROM guild_custom_rules \
              WHERE discord_guild_id = ?1", guild,
@@ -183,7 +183,7 @@ impl RoleManager {
         }
     }
 
-    fn update_cached_rules(
+    fn update_rules(
         &self, lock: &RwLock<VerificationRulesStatus>, guild: GuildId, force: bool,
     ) -> Result<()> {
         if force || !lock.read().is_compiled() {
@@ -198,14 +198,14 @@ impl RoleManager {
 
     fn refresh_cache(&self, guild: GuildId) -> Result<()> {
         let cache = self.0.rule_cache.read(&guild)?;
-        self.update_cached_rules(&cache, guild, true)
+        self.update_rules(&cache, guild, true)
     }
     pub fn set_active_role(
         &self, guild: GuildId, rule_name: &str, discord_role: Option<RoleId>
     ) -> Result<()> {
         let conn = self.0.database.connect()?;
         conn.transaction_immediate(|| {
-            let role_exists = VerificationRule::has_builtin(rule_name) || conn.query_cached(
+            let role_exists = VerificationRule::has_builtin(rule_name) || conn.query(
                 "SELECT COUNT(*) FROM guild_custom_rules \
                  WHERE discord_guild_id = ?1 AND rule_name = ?2",
                 (guild, rule_name)
@@ -217,7 +217,7 @@ impl RoleManager {
             let limits_enabled = self.0.config.get(None, ConfigKeys::RolesEnableLimits)?;
             if limits_enabled {
                 let max_assigned = self.0.config.get(None, ConfigKeys::RolesMaxAssigned)?;
-                let assigned_count = conn.query_cached(
+                let assigned_count = conn.query(
                     "SELECT COUNT(*) FROM guild_active_rules \
                      WHERE discord_guild_id = ?1 AND rule_name != ?2",
                     (guild, rule_name)
@@ -230,14 +230,14 @@ impl RoleManager {
             }
 
             if let Some(discord_role) = discord_role {
-                conn.execute_cached(
+                conn.execute(
                     "REPLACE INTO guild_active_rules (\
                         discord_guild_id, rule_name, discord_role_id, last_updated\
                     ) VALUES (?1, ?2, ?3, ?4)",
                     (guild, rule_name, discord_role, SystemTime::now())
                 )?;
             } else {
-                conn.execute_cached(
+                conn.execute(
                     "DELETE FROM guild_active_rules \
                      WHERE discord_guild_id = ?1 AND rule_name = ?2",
                     (guild, rule_name)
@@ -258,7 +258,7 @@ impl RoleManager {
             let limits_enabled = self.0.config.get(None, ConfigKeys::RolesEnableLimits)?;
             if limits_enabled {
                 let max_custom = self.0.config.get(None, ConfigKeys::RolesMaxCustomRules)?;
-                let custom_count = conn.query_cached(
+                let custom_count = conn.query(
                     "SELECT COUNT(*) FROM guild_custom_rules \
                      WHERE discord_guild_id = ?1 AND rule_name != ?2",
                     (guild, rule_name)
@@ -274,14 +274,14 @@ impl RoleManager {
                 Ok(_) => { }
                 Err(err) => cmd_error!("Failed to parse custom rule: {}", err),
             }
-            conn.execute_cached(
+            conn.execute(
                 "REPLACE INTO guild_custom_rules (\
                     discord_guild_id, rule_name, condition, last_updated\
                 ) VALUES (?1, ?2, ?3, ?4)",
                 (guild, rule_name, condition, SystemTime::now())
             )?;
         } else {
-            self.0.database.connect()?.execute_cached(
+            self.0.database.connect()?.execute(
                 "DELETE FROM guild_custom_rules \
                  WHERE discord_guild_id = ?1 AND rule_name = ?2",
                 (guild, rule_name)
@@ -292,7 +292,7 @@ impl RoleManager {
     }
     pub fn check_error(&self, guild: GuildId) -> Result<Option<Cow<'static, str>>> {
         let lock = self.0.rule_cache.read(&guild)?;
-        self.update_cached_rules(&lock, guild, false)?;
+        self.update_rules(&lock, guild, false)?;
         let read = lock.read();
         Ok(match *read {
             VerificationRulesStatus::Error(ref str) => Some(str.clone()),
@@ -304,7 +304,7 @@ impl RoleManager {
         &self, guild: GuildId, roblox_id: RobloxUserID
     ) -> Result<Vec<AssignedRole>> {
         let lock = self.0.rule_cache.read(&guild)?;
-        self.update_cached_rules(&lock, guild, false)?;
+        self.update_rules(&lock, guild, false)?;
         let read = lock.read();
         Ok(match *read {
             VerificationRulesStatus::Compiled(ref rule_set, ref role_info) => {
@@ -400,7 +400,7 @@ impl RoleManager {
     fn get_cooldown_cache(
         database: &Database, guild_id: GuildId, user_id: UserId, is_manual: bool,
     ) -> Result<Option<SystemTime>> {
-        database.connect()?.query_cached(
+        database.connect()?.query(
             "SELECT last_updated FROM roles_last_updated \
              WHERE discord_guild_id = ?1 AND discord_user_id = ?2 AND is_manual = ?3",
             (guild_id, user_id, is_manual)
@@ -431,7 +431,7 @@ impl RoleManager {
         }
 
         let result = self.update_user(guild_id, user_id)?;
-        self.0.database.connect()?.execute_cached(
+        self.0.database.connect()?.execute(
             "REPLACE INTO roles_last_updated (\
                 discord_guild_id, discord_user_id, is_manual, last_updated\
             ) VALUES (?1, ?2, ?3, ?4)", (guild_id, user_id, is_manual, now),
@@ -442,7 +442,7 @@ impl RoleManager {
 
     pub fn explain_rule_set(&self, guild: GuildId) -> Result<String> {
         let lock = self.0.rule_cache.read(&guild)?;
-        self.update_cached_rules(&lock, guild, false)?;
+        self.update_rules(&lock, guild, false)?;
         let read = lock.read();
         match *read {
             VerificationRulesStatus::Compiled(ref set, _) => Ok(format!("{}", set)),

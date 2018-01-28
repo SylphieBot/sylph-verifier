@@ -118,7 +118,7 @@ impl <T> ResultCmdExt<T> for Result<T> {
                  • It has the permissions it requires: Manage Roles, Manage Nicknames, \
                    Read Messages, Send Messages, Manage Messages, Read Message History\n\
                  • There is no per-channel permissions overwrites preventing it from using \
-                   those permissions on this channel.
+                   those permissions on this channel.\n\
                  • It has a role with a greater rank than all roles it needs to manage."
             ),
             Err(e) => Err(e),

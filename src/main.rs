@@ -9,7 +9,6 @@
 // TODO: Pass around IDs less to touch Serenity's cache less.
 // TODO: Add statistics tracking to better understand current bot load.
 // TODO: Restrict commands that can be used in verification channels.
-// TODO: Add support for updating verification channel messages.
 
 extern crate backtrace;
 extern crate byteorder;

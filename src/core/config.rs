@@ -27,13 +27,13 @@ fn get_db<T: FromSql>(
 ) -> Result<Option<T>> {
     Ok(match guild {
         Some(guild) => {
-            conn.query_cached(
+            conn.query(
                 "SELECT value FROM guild_config \
                 WHERE discord_guild_id = ?1 AND key = ?2", (guild, key)
             ).get_opt()?
         }
         None =>
-            conn.query_cached(
+            conn.query(
                 "SELECT value FROM global_config WHERE key = ?1", key
             ).get_opt()?
     })
@@ -43,12 +43,12 @@ fn set_db<T: ToSql>(
 ) -> Result<()> {
     match guild {
         Some(guild) => {
-            conn.execute_cached(
+            conn.execute(
                 "REPLACE INTO guild_config (discord_guild_id, key, value) \
                  VALUES (?1, ?2, ?3)", (guild, key, value))?;
         }
         None => {
-            conn.execute_cached(
+            conn.execute(
                 "REPLACE INTO global_config (key, value) VALUES (?1, ?2)", (key, value))?;
         }
     }
@@ -59,12 +59,12 @@ fn reset_db(
 ) -> Result<()> {
     match guild {
         Some(guild) => {
-            conn.execute_cached(
+            conn.execute(
                 "DELETE FROM guild_config \
                  WHERE discord_guild_id = ?1 AND key = ?2", (guild, key))?;
         }
         None => {
-            conn.execute_cached(
+            conn.execute(
                 "DELETE FROM global_config WHERE key = ?1", key)?;
         }
     }
@@ -113,12 +113,15 @@ macro_rules! config_keys {
                 }
                 Ok(())
             }
-            fn after_update(&self, core: &VerifierCore, name: ConfigKeyName) -> Result<()> {
+            fn after_update(
+                &self, core: &VerifierCore, name: ConfigKeyName, guild: Option<GuildId>,
+            ) -> Result<()> {
                 match name {
                     $(ConfigKeyName::$name => {
                         $({
-                            let after_update: fn(&VerifierCore) -> Result<()> = $after_update;
-                            after_update(core)?;
+                            let after_update: fn(Option<GuildId>, &VerifierCore) -> Result<()> =
+                                $after_update;
+                            after_update(guild, core)?;
                         })*
                     })*
                 }
@@ -147,7 +150,7 @@ macro_rules! config_keys {
                         }
                     })*
                 }
-                self.after_update(core, key.enum_name)
+                self.after_update(core, key.enum_name, guild)
             }
             fn get<T: FromSql + Clone + 'static>(
                 &self, conn: &DatabaseConnection, guild: Option<GuildId>, key: ConfigKey<T>,
@@ -182,7 +185,7 @@ macro_rules! config_keys {
                         }
                     })*
                 }
-                self.after_update(core, name)
+                self.after_update(core, name, guild)
             }
         }
 
@@ -199,16 +202,16 @@ macro_rules! config_keys {
 
 config_keys! {
     // Discord settings
-    CommandPrefix<String>("!".to_owned(), |core| core.refresh_place());
-    DiscordToken<Option<String>>(None, |core| core.discord().reconnect());
+    CommandPrefix<String>("!".to_owned(), |_, core| core.refresh_place());
+    DiscordToken<Option<String>>(None, |_, core| core.discord().reconnect());
     BotOwnerId<Option<u64>>(None);
 
     // Limits for verification rules
-    RolesEnableLimits<bool>(false, |core| Ok(core.roles().clear_rule_cache()));
-    RolesMaxAssigned<u32>(15, |core| Ok(core.roles().clear_rule_cache()));
-    RolesMaxCustomRules<u32>(30, |core| Ok(core.roles().clear_rule_cache()));
-    RolesMaxInstructions<u32>(500, |core| Ok(core.roles().clear_rule_cache()));
-    RolesMaxWebRequests<u32>(10, |core| Ok(core.roles().clear_rule_cache()));
+    RolesEnableLimits<bool>(false, |_, core| Ok(core.roles().clear_rule_cache()));
+    RolesMaxAssigned<u32>(15, |_, core| Ok(core.roles().clear_rule_cache()));
+    RolesMaxCustomRules<u32>(30, |_, core| Ok(core.roles().clear_rule_cache()));
+    RolesMaxInstructions<u32>(500, |_, core| Ok(core.roles().clear_rule_cache()));
+    RolesMaxWebRequests<u32>(10, |_, core| Ok(core.roles().clear_rule_cache()));
 
     // Role management settings
     SetNickname<bool>(true);
@@ -224,22 +227,23 @@ config_keys! {
     AutoUpdateCooldownSeconds<u64>(60 * 60 * 24);
 
     // Verification place settings
-    PlaceUITitle<String>("Roblox Account Verifier".to_owned(), |core| core.refresh_place());
+    PlaceUITitle<String>("Roblox Account Verifier".to_owned(), |_, core| core.refresh_place());
     PlaceUIInstructions<String>(
         "To verify your Roblox account with this server, please enter the following \
          command on it.".to_owned(),
-         |core| core.refresh_place());
-    PlaceUIBackground<Option<String>>(None, |core| core.refresh_place());
-    PlaceID<Option<u64>>(None);
+         |_, core| core.refresh_place());
+    PlaceUIBackground<Option<String>>(None, |_, core| core.refresh_place());
+    PlaceID<Option<u64>>(None, |guild, core| core.verify_channel().update(guild));
 
     // Verification settings
     VerificationAttemptLimit<u32>(10);
     VerificationCooldownSeconds<u64>(60 * 60 * 24);
 
-    VerificationChannelIntro<Option<String>>(None);
+    VerificationChannelIntro<Option<String>>(None,
+        |guild, core| core.verify_channel().update(guild));
     VerificationChannelDeleteSeconds<u32>(30);
 
-    TokenValiditySeconds<u32>(60 * 5, |core| {
+    TokenValiditySeconds<u32>(60 * 5, |_, core| {
         core.verifier().rekey(false)?;
         core.refresh_place()?;
         Ok(())

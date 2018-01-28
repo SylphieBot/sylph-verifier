@@ -6,6 +6,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, Duration};
 use util::ConcurrentCache;
 
+// TODO: Handle the verification channel being deleted.
+
 struct VerificationChannelManagerData {
     config: ConfigManager, database: Database,
     channel_cache: ConcurrentCache<GuildId, Option<(ChannelId, MessageId)>>,
@@ -27,7 +29,7 @@ impl VerificationChannelManager {
     fn get_verification_channel(
         database: &Database, guild_id: GuildId
     ) -> Result<Option<(ChannelId, MessageId)>> {
-        database.connect()?.query_cached(
+        database.connect()?.query(
             "SELECT discord_channel_id, header_message_id FROM verification_channel_info \
              WHERE discord_guild_id = ?1", guild_id
         ).get_opt::<(ChannelId, MessageId)>()
@@ -143,6 +145,36 @@ impl VerificationChannelManager {
         let message = channel_id.send_message(|x| x.content(message_text))?;
         self.set_verification_channel(guild_id, channel_id, message.id)?;
 
+        Ok(())
+    }
+    fn update_message_guild(&self, guild_id: GuildId) -> Result<()> {
+        if let Some((channel_id, message_id)) = *self.0.channel_cache.read(&guild_id)? {
+            let message_text = self.intro_message(guild_id)?;
+            channel_id.edit_message(message_id, |x| x.content(message_text))?;
+        }
+        Ok(())
+    }
+    fn update_all_messages(&self) -> Result<()> {
+        let guilds = self.0.database.connect()?.query(
+            "SELECT discord_guild_id FROM verification_channel_info", (),
+        ).get_all::<GuildId>()?;
+        for guild_id in guilds {
+            self.update_message_guild(guild_id).discord_to_cmd().cmd_ok()?;
+        }
+        Ok(())
+    }
+    pub fn update(&self, guild_id: Option<GuildId>) -> Result<()> {
+        if let Some(guild_id) = guild_id {
+            self.update_message_guild(guild_id).discord_to_cmd().cmd_ok()
+        } else {
+            self.update_all_messages()
+        }
+    }
+    pub fn remove(&self, guild_id: GuildId) -> Result<()> {
+        self.0.database.connect()?.execute(
+            "DELETE FROM verification_channel_info WHERE discord_guild_id = ?1", guild_id,
+        )?;
+        *self.0.channel_cache.write(&guild_id)? = None;
         Ok(())
     }
 

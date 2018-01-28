@@ -189,15 +189,15 @@ impl DatabaseConnection {
                 TransactionBehavior::Immediate => "BEGIN IMMEDIATE",
                 TransactionBehavior::Exclusive => "BEGIN EXCLUSIVE",
             };
-            self.execute_cached(sql, ())?;
+            self.execute(sql, ())?;
             let _depth = TransactionDepthGuard::increment(self);
             match f() {
                 Ok(value) => {
-                    self.execute_cached("COMMIT", ())?;
+                    self.execute("COMMIT", ())?;
                     Ok(value)
                 }
                 Err(e) => {
-                    self.execute_cached("ROLLBACK", ())?;
+                    self.execute("ROLLBACK", ())?;
                     Err(e)
                 }
             }
@@ -236,18 +236,9 @@ impl DatabaseConnection {
     }
 
     pub fn execute<T : ToSqlArgs>(&self, sql: &str, args: T) -> Result<isize> {
-        Ok(args.to_sql_args(|args| Ok(self.conn.execute(sql, args)?))? as isize)
-    }
-    pub fn query<'a, 'b, T : ToSqlArgs>(
-        &'a self, sql: &'b str, args: T
-    ) -> QueryDSL<'a, 'b, T> {
-        QueryDSL { conn: self, sql, cache: false, args }
-    }
-
-    pub fn execute_cached<T : ToSqlArgs>(&self, sql: &str, args: T) -> Result<isize> {
         Ok(args.to_sql_args(|args| Ok(self.conn.prepare_cached(sql)?.execute(args)?))? as isize)
     }
-    pub fn query_cached<'a, 'b, T : ToSqlArgs>(
+    pub fn query<'a, 'b, T : ToSqlArgs>(
         &'a self, sql: &'b str, args: T
     ) -> QueryDSL<'a, 'b, T> {
         QueryDSL { conn: self, sql, cache: true, args }

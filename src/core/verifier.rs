@@ -154,7 +154,7 @@ struct TokenContext {
 }
 impl TokenContext {
     fn from_db_internal(conn: &DatabaseConnection) -> Result<Option<TokenContext>> {
-        let mut results = conn.query_cached(
+        let mut results = conn.query(
             "SELECT id, key, time_increment, version, change_reason FROM verification_keys \
              ORDER BY id DESC LIMIT ?1",
             1 + HISTORY_COUNT,
@@ -178,7 +178,7 @@ impl TokenContext {
             key.push((r >> 24) as u8);
         }
 
-        conn.execute_cached(
+        conn.execute(
             "INSERT INTO verification_keys (\
                 key, time_increment, version, change_reason, last_updated\
             ) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -269,13 +269,13 @@ impl Verifier {
 
     pub fn get_verified_roblox_user(&self, user: UserId) -> Result<Option<RobloxUserID>> {
         let conn = self.0.database.connect()?;
-        conn.query_cached(
+        conn.query(
             "SELECT roblox_user_id FROM discord_user_info WHERE discord_user_id = ?1", user
         ).get_opt()
     }
     pub fn get_verified_discord_user(&self, user: RobloxUserID) -> Result<Option<UserId>> {
         let conn = self.0.database.connect()?;
-        conn.query_cached(
+        conn.query(
             "SELECT discord_user_info FROM roblox_user_id WHERE discord_user_info = ?1", user
         ).get_opt()
     }
@@ -290,7 +290,7 @@ impl Verifier {
 
         // Check cooldown
         let result = conn.transaction_immediate(|| {
-            let attempt_info = conn.query_cached(
+            let attempt_info = conn.query(
                 "SELECT attempt_count, last_attempt FROM verification_cooldown \
                  WHERE discord_user_id = ?1", discord_id
             ).get_opt::<(u32, SystemTime)>()?;
@@ -307,7 +307,7 @@ impl Verifier {
             } else {
                 1
             };
-            conn.execute_cached(
+            conn.execute(
                 "REPLACE INTO verification_cooldown (\
                     discord_user_id, last_attempt, attempt_count\
                 ) VALUES (?1, ?2, ?3)", (discord_id, SystemTime::now(), new_attempt_count)
@@ -324,7 +324,7 @@ impl Verifier {
             let token_ctx = self.0.token_ctx.read();
             match token_ctx.check_token(roblox_id, token)? {
                 TokenStatus::Verified { key_id, epoch } => {
-                    let last_key = conn.query_cached(
+                    let last_key = conn.query(
                         "SELECT last_key_id, last_key_epoch FROM roblox_user_info \
                          WHERE roblox_user_id = ?1", roblox_id
                     ).get_opt::<(u64, i64)>()?;
@@ -333,7 +333,7 @@ impl Verifier {
                             return Ok(VerifyResult::TokenAlreadyUsed)
                         }
                     }
-                    conn.execute_cached(
+                    conn.execute(
                         "REPLACE INTO roblox_user_info \
                              (roblox_user_id, last_key_id, last_key_epoch, last_updated) \
                          VALUES (?1, ?2, ?3, ?4)", (roblox_id, key_id, epoch, SystemTime::now()),
@@ -356,7 +356,7 @@ impl Verifier {
             let allow_reverification = self.0.config.get(None, ConfigKeys::AllowReverification)?;
 
             if !allow_reverification {
-                let verified_as = conn.query_cached(
+                let verified_as = conn.query(
                     "SELECT roblox_user_id FROM discord_user_info \
                      WHERE discord_user_id = ?1", discord_id,
                 ).get_opt::<Option<RobloxUserID>>()?.and_then(|x| x);
@@ -364,7 +364,7 @@ impl Verifier {
                     return Ok(VerifyResult::SenderVerifiedAs { other_roblox_id })
                 }
 
-                let other_id = conn.query_cached(
+                let other_id = conn.query(
                     "SELECT discord_user_id from discord_user_info \
                      WHERE roblox_user_id = ?1", roblox_id,
                 ).get_opt::<UserId>()?;
@@ -372,7 +372,7 @@ impl Verifier {
                     return Ok(VerifyResult::RobloxAccountVerifiedTo { other_discord_id })
                 }
             } else {
-                let last_updated = conn.query_cached(
+                let last_updated = conn.query(
                     "SELECT roblox_user_id, last_updated FROM discord_user_info \
                      WHERE discord_user_id = ?1", discord_id
                 ).get_opt::<(Option<RobloxUserID>, SystemTime)>()?;
@@ -388,14 +388,14 @@ impl Verifier {
                         return Ok(VerifyResult::ReverifyOnCooldown { cooldown, cooldown_ends })
                     }
 
-                    conn.execute_cached(
+                    conn.execute(
                         "UPDATE discord_user_info SET roblox_user_id = NULL \
                          WHERE roblox_user_id = ?1", roblox_id,
                     )?;
                 }
             }
 
-            conn.execute_cached(
+            conn.execute(
                 "REPLACE INTO discord_user_info (discord_user_id, roblox_user_id, last_updated) \
                  VALUES (?1, ?2, ?3)", (discord_id, roblox_id, SystemTime::now()),
             )?;
