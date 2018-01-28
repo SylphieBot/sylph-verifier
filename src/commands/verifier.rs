@@ -33,6 +33,8 @@ fn reverify_help(
     }
 }
 fn do_verify(ctx: &CommandContext, _: &Context, msg: &Message) -> Result<()> {
+    cmd_ensure!(ctx.argc() >= 2, ctx.core.verify_channel().verify_instructions()?);
+
     let roblox_username = ctx.arg(0)?;
     let token = ctx.arg(1)?;
 
@@ -273,6 +275,10 @@ pub const COMMANDS: &[Command] = &[
         .help(None, "Updates your roles according to your Roblox account.")
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg| {
+            cmd_ensure!(ctx.core.verifier().get_verified_roblox_user(msg.author.id)?.is_some(),
+                        "You are not verified with this bot. {}",
+                        ctx.core.verify_channel().verify_instructions()?);
+
             let guild_id = msg.guild_id().chain_err(|| "Guild ID not found.")?;
             let cooldown = max(
                 ctx.core.config().get(None, ConfigKeys::MinimumUpdateCooldownSeconds)?,

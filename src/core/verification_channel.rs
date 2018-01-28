@@ -99,6 +99,23 @@ impl VerificationChannelManager {
         Ok(())
     }
 
+    pub fn verify_instructions(&self) -> Result<String> {
+        if let Some(place_id) = self.0.config.get(None, ConfigKeys::PlaceID)? {
+            let prefix = self.0.config.get(None, ConfigKeys::CommandPrefix)?;
+            Ok(format!("To verify your Roblox account with your Discord account, please \
+                        follow the following instructions:\n\
+                        • Visit this Roblox place as the account you want to verify as: \
+                          <https://roblox.com/--place?id={}>\n\
+                        • Type the command it shows in the oval box into this channel. It will \
+                          look like `{}verify YourUsername ABCDEF`.\n\
+                        • Your roles will be set according to your Roblox account.",
+                       place_id, prefix))
+        } else {
+            error!("No place ID set! Please upload the place file to Roblox, and use \
+                    \"set_global place_id [your place id]\".");
+            cmd_error!("No place ID set. Please ask the bot owner to fix this.")
+        }
+    }
     fn intro_message(&self, guild_id: GuildId) -> Result<String> {
         let verify_intro =
             self.0.config.get(Some(guild_id), ConfigKeys::VerificationChannelIntro)?;
@@ -114,22 +131,10 @@ impl VerificationChannelManager {
             None => "",
         };
 
-        if let Some(place_id) = self.0.config.get(Some(guild_id), ConfigKeys::PlaceID)? {
-            Ok(format!("{}{}To verify your Roblox account with your Discord account, please \
-                        follow the following instructions:\n\
-                        • Visit this Roblox place as the account you want to verify as: \
-                          <https://roblox.com/--place?id={}>\n\
-                        • Type the command it shows in the oval box into this channel.\n\
-                        • Your roles will be set according to your Roblox account.
-                        {}{}",
-                       verify_intro.unwrap_or_else(|| String::new()), intro_space,
-                       place_id,
-                       footer_space, verify_footer.unwrap_or_else(|| String::new())))
-        } else {
-            error!("No place ID set! Please upload the place file to Roblox, and use \
-                    \"set_global place_id [your place id]\".");
-            cmd_error!("No place ID set. Please ask the bot owner to fix this.")
-        }
+        Ok(format!("{}{}{}{}{}",
+                   verify_intro.unwrap_or_else(|| String::new()), intro_space,
+                   self.verify_instructions()?,
+                   footer_space, verify_footer.unwrap_or_else(|| String::new())))
     }
     pub fn setup_check(&self, _: GuildId, channel_id: ChannelId) -> Result<()> {
         let messages = channel_id.messages(|x| x.limit(51))?;
