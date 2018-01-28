@@ -115,14 +115,12 @@ impl VerificationChannelManager {
         };
 
         if let Some(place_id) = self.0.config.get(Some(guild_id), ConfigKeys::PlaceID)? {
-            Ok(format!(".\n\
-                        {}{}To verify your Roblox account with your Discord account, please \
+            Ok(format!("{}{}To verify your Roblox account with your Discord account, please \
                         follow the following instructions:\n\
-                        • Visit the verification place at <https://roblox.com/--place?id={}> as \
-                          the account you want to verify as.\n\
-                        • Enter the command displayed in the oval box there into this channel.\n\
-                        • Your roles will be set according to your Roblox account. If they are \
-                          not, please contact the server admins.\
+                        • Visit this Roblox place as the account you want to verify as: \
+                          <https://roblox.com/--place?id={}>\n\
+                        • Type the command it shows in the oval box into this channel.\n\
+                        • Your roles will be set according to your Roblox account.
                         {}{}",
                        verify_intro.unwrap_or_else(|| String::new()), intro_space,
                        place_id,
