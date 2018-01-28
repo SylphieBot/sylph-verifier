@@ -20,7 +20,8 @@ use std::thread;
 use std::time::Duration;
 use util;
 
-// TODO: Check messages in verification channels on login.
+// TODO: Tell users who talk in a verification channel what happened to their message?
+// TODO: Don't error if another bot deletes a message first.
 
 struct DiscordContext<'a> {
     ctx: Context, message: &'a Message, content: &'a str, prefix: String,

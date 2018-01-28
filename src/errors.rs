@@ -8,6 +8,8 @@ use std::borrow::Cow;
 use std::error;
 use std::fmt;
 
+// TODO: Add a more detailed error message for Discord http errors.
+
 mod internal {
     use *;
     error_chain! {

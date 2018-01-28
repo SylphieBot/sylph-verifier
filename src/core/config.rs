@@ -242,6 +242,8 @@ config_keys! {
     VerificationChannelIntro<Option<String>>(None,
         |guild, core| core.verify_channel().update(guild));
     VerificationChannelDeleteSeconds<u32>(30);
+    VerificationChannelFooter<Option<String>>(None,
+        |guild, core| core.verify_channel().update(guild));
 
     TokenValiditySeconds<u32>(60 * 5, |_, core| {
         core.verifier().rekey(false)?;

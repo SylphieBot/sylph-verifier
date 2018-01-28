@@ -100,22 +100,33 @@ impl VerificationChannelManager {
     }
 
     fn intro_message(&self, guild_id: GuildId) -> Result<String> {
-        let verify_intro = self.0.config.get(Some(guild_id), ConfigKeys::VerificationChannelIntro)?;
-        let space = match verify_intro {
+        let verify_intro =
+            self.0.config.get(Some(guild_id), ConfigKeys::VerificationChannelIntro)?;
+        let intro_space = match verify_intro {
             Some(ref x) => if x.contains('\n') { "\n\n" } else { " " },
             None => "",
         };
+
+        let verify_footer =
+            self.0.config.get(Some(guild_id), ConfigKeys::VerificationChannelFooter)?;
+        let footer_space = match verify_footer {
+            Some(_) => "\n\n",
+            None => "",
+        };
+
         if let Some(place_id) = self.0.config.get(Some(guild_id), ConfigKeys::PlaceID)? {
-            Ok(format!("@everyone\n\
+            Ok(format!(".\n\
                         {}{}To verify your Roblox account with your Discord account, please \
                         follow the following instructions:\n\
                         • Visit the verification place at <https://roblox.com/--place?id={}> as \
                           the account you want to verify as.\n\
                         • Enter the command displayed in the oval box there into this channel.\n\
                         • Your roles will be set according to your Roblox account. If they are \
-                          not, please contact the server admins.",
-                       verify_intro.unwrap_or_else(|| String::new()), space,
-                       place_id))
+                          not, please contact the server admins.\
+                        {}{}",
+                       verify_intro.unwrap_or_else(|| String::new()), intro_space,
+                       place_id,
+                       footer_space, verify_footer.unwrap_or_else(|| String::new())))
         } else {
             error!("No place ID set! Please upload the place file to Roblox, and use \
                     \"set_global place_id [your place id]\".");

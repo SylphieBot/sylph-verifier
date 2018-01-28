@@ -235,6 +235,11 @@ config_values! {
             Ok(secs)
         },
         |_, x| Ok(util::to_english_time_precise(x as u64)));
+    verification_channel_footer<Option<String>>(
+        VerificationChannelFooter, true, |_| Ok(GuildShowType::OnlyInGuild),
+        "A sentence that you can add to the bottom of your server's verification message.",
+        |x| Ok(Some(x.to_owned())),
+        |_, x| Ok(x.map_or_else(|| "*(none set)*".to_owned(), |x| format!("\"{}\"", x))));
 
     token_validity<u32>(
         TokenValiditySeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),

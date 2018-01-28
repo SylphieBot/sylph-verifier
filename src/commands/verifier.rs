@@ -10,6 +10,7 @@ use util;
 
 // TODO: Check role existence.
 // TODO: Consider moving error messages back into roles.rs
+// TODO: Suggest proper usage when people are using it wrong.
 
 fn get_discord_username(discord_id: UserId) -> String {
     match discord_id.find() {
