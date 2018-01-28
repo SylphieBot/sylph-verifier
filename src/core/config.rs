@@ -10,6 +10,8 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use util::ConcurrentCache;
 
+// TODO: Add option for autoupdate to ignore unverified users.
+
 pub struct ConfigKey<T: 'static> {
     enum_name: ConfigKeyName, _phantom: PhantomData<(fn(T), fn() -> T)>,
 }

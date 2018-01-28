@@ -8,8 +8,6 @@ use std::borrow::Cow;
 use std::error;
 use std::fmt;
 
-// TODO: Add a more detailed error message for Discord http errors.
-
 mod internal {
     use *;
     error_chain! {
@@ -22,13 +20,22 @@ mod internal {
             Rusqlite(rusqlite::Error);
             Rusqlite_FromSqlError(rusqlite::types::FromSqlError);
             SerdeJson(serde_json::Error);
-            Serenity(serenity::Error);
             Str_Utf8Error(std::str::Utf8Error);
             String_FromUtf8Error(std::string::FromUtf8Error);
             SystemTimeError(std::time::SystemTimeError);
         }
 
         errors {
+            Serenity(err: serenity::Error) {
+                description("serenity encountered an error")
+                display("{}", err)
+            }
+
+            HttpError(status: hyper::status::StatusCode) {
+                description("serenity encountered an non-successful status")
+                display("Serenity encountered an non-successful status: {}", status)
+            }
+
             CommandError(err: std::borrow::Cow<'static, str>) {
                 description("command encountered an error")
                 display("{}", err)
@@ -46,6 +53,17 @@ mod internal {
 }
 // Reexport these types so IDEs pick up on them correctly.
 pub use self::internal::{Error, ErrorKind, Result, ResultExt};
+
+impl From<SerenityError> for Error {
+    fn from(err: SerenityError) -> Self {
+        match err {
+            SerenityError::Http(HttpError::UnsuccessfulRequest(ref res)) =>
+                Error::from_kind(ErrorKind::HttpError(res.status)),
+            err =>
+                Error::from_kind(ErrorKind::Serenity(err)),
+        }
+    }
+}
 
 #[derive(Debug)]
 struct StringError(String);
@@ -113,15 +131,16 @@ impl <T> ResultCmdExt<T> for Result<T> {
                  • There is no per-channel permissions overwrites preventing it from using \
                    those permissions on this channel."
             ),
-            Err(Error(box (ErrorKind::Serenity(
-                SerenityError::Http(HttpError::UnsuccessfulRequest(ref res))
-            ), _))) if res.status == StatusCode::Forbidden => cmd_error!(
+            Err(Error(box (ErrorKind::HttpError(StatusCode::Forbidden), _))) => cmd_error!(
                 "The bot has encountered an unknown permissions error. Please check that:\n\
                  • It has the permissions it requires: Manage Roles, Manage Nicknames, \
                    Read Messages, Send Messages, Manage Messages, Read Message History\n\
                  • There is no per-channel permissions overwrites preventing it from using \
                    those permissions on this channel.\n\
                  • It has a role with a greater rank than all roles it needs to manage."
+            ),
+            Err(Error(box (ErrorKind::HttpError(StatusCode::NotFound), _))) => cmd_error!(
+                "A user, message, role or channel the bot is configured to use has been deleted."
             ),
             Err(e) => Err(e),
         }
