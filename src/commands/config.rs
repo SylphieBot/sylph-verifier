@@ -246,9 +246,13 @@ config_values! {
         "How many seconds a verification token is valid for.",
         parse_u32, |_, x| Ok(util::to_english_time_precise(x as u64)));
 
-    allow_reverification<bool>(
-        AllowReverification, false, |_| Ok(GuildShowType::OnlyInTerminal),
-        "Whether a user can reverify a Discord or Roblox account that is already verified.",
+    allow_reverify_discord_account<bool>(
+        AllowReverifyDiscord, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "Whether a user can reverify a Discord account that is already verified.",
+        parse_bool, print_display);
+    allow_reverify_roblox_account<bool>(
+        AllowReverifyRoblox, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        "Whether a user can reverify a Roblox account that is already verified.",
         parse_bool, print_display);
     reverification_cooldown<u64>(
         ReverificationCooldownSeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),

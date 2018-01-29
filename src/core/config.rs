@@ -253,7 +253,8 @@ config_keys! {
         Ok(())
     });
 
-    AllowReverification<bool>(false);
+    AllowReverifyDiscord<bool>(false);
+    AllowReverifyRoblox<bool>(false);
     ReverificationCooldownSeconds<u64>(60 * 60 * 24);
 }
 

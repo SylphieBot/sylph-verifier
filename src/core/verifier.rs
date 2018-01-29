@@ -269,9 +269,9 @@ impl Verifier {
 
     pub fn get_verified_roblox_user(&self, user: UserId) -> Result<Option<RobloxUserID>> {
         let conn = self.0.database.connect()?;
-        conn.query(
+        Ok(conn.query(
             "SELECT roblox_user_id FROM discord_user_info WHERE discord_user_id = ?1", user
-        ).get_opt()
+        ).get_opt::<Option<RobloxUserID>>()?.and_then(|x| x))
     }
     pub fn get_verified_discord_user(&self, user: RobloxUserID) -> Result<Option<UserId>> {
         let conn = self.0.database.connect()?;
@@ -352,42 +352,42 @@ impl Verifier {
         }
 
         // Attempt to verify user
+        let allow_reverify_discord = self.0.config.get(None, ConfigKeys::AllowReverifyDiscord)?;
+        let allow_reverify_roblox = self.0.config.get(None, ConfigKeys::AllowReverifyRoblox)?;
         conn.transaction_immediate(|| {
-            let allow_reverification = self.0.config.get(None, ConfigKeys::AllowReverification)?;
-
-            if !allow_reverification {
-                let verified_as = conn.query(
-                    "SELECT roblox_user_id FROM discord_user_info \
-                     WHERE discord_user_id = ?1", discord_id,
-                ).get_opt::<Option<RobloxUserID>>()?.and_then(|x| x);
-                if let Some(other_roblox_id) = verified_as {
-                    return Ok(VerifyResult::SenderVerifiedAs { other_roblox_id })
+            let check_discord = conn.query(
+                "SELECT roblox_user_id, last_updated FROM discord_user_info \
+                 WHERE discord_user_id = ?1", discord_id
+            ).get_opt::<(Option<RobloxUserID>, SystemTime)>()?;
+            if let Some((current_id, last_updated)) = check_discord {
+                if !allow_reverify_discord {
+                    if let Some(current_id) = current_id {
+                        return Ok(VerifyResult::SenderVerifiedAs { other_roblox_id: current_id })
+                    }
+                }
+                if current_id == Some(roblox_id) {
+                    return Ok(VerifyResult::SenderVerifiedAs { other_roblox_id: roblox_id })
                 }
 
-                let other_id = conn.query(
-                    "SELECT discord_user_id from discord_user_info \
-                     WHERE roblox_user_id = ?1", roblox_id,
-                ).get_opt::<UserId>()?;
-                if let Some(other_discord_id) = other_id {
-                    return Ok(VerifyResult::RobloxAccountVerifiedTo { other_discord_id })
+                let cooldown =
+                    self.0.config.get(None, ConfigKeys::ReverificationCooldownSeconds)?;
+                let cooldown_ends = last_updated + Duration::from_secs(cooldown);
+                if SystemTime::now() < cooldown_ends {
+                    return Ok(VerifyResult::ReverifyOnCooldown { cooldown, cooldown_ends })
                 }
-            } else {
-                let last_updated = conn.query(
-                    "SELECT roblox_user_id, last_updated FROM discord_user_info \
-                     WHERE discord_user_id = ?1", discord_id
-                ).get_opt::<(Option<RobloxUserID>, SystemTime)>()?;
-                if let Some((current_id, last_updated)) = last_updated {
-                    if current_id == Some(roblox_id) {
-                        return Ok(VerifyResult::SenderVerifiedAs { other_roblox_id: roblox_id })
+            }
+
+            let check_roblox = conn.query(
+                "SELECT discord_user_id FROM discord_user_info \
+                 WHERE roblox_user_id = ?1", roblox_id,
+            ).get_opt::<UserId>()?;
+            if let Some(current_id) = check_roblox {
+                if current_id != discord_id {
+                    if !allow_reverify_roblox {
+                        return Ok(VerifyResult::RobloxAccountVerifiedTo { other_discord_id: current_id })
                     }
 
-                    let cooldown =
-                        self.0.config.get(None, ConfigKeys::ReverificationCooldownSeconds)?;
-                    let cooldown_ends = last_updated + Duration::from_secs(cooldown);
-                    if SystemTime::now() < cooldown_ends {
-                        return Ok(VerifyResult::ReverifyOnCooldown { cooldown, cooldown_ends })
-                    }
-
+                    // TODO: Forcefully update this other person's roles somehow.
                     conn.execute(
                         "UPDATE discord_user_info SET roblox_user_id = NULL \
                          WHERE roblox_user_id = ?1", roblox_id,
