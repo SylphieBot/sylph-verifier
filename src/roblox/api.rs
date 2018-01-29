@@ -45,11 +45,11 @@ pub fn for_username(name: &str) -> Result<Option<RobloxUserID>> {
     Ok(info.id.map(RobloxUserID))
 }
 
-pub fn lookup_username(id: RobloxUserID) -> Result<String> {
+pub fn lookup_username(id: RobloxUserID) -> Result<Option<String>> {
     let uri = format!("https://api.roblox.com/users/{}", id.0);
     let json = reqwest::get(&uri)?.error_for_status()?.text()?;
     let info = serde_json::from_str::<RobloxIDLookup>(&json)?;
-    Ok(info.name.expect("Roblox ID not found?"))
+    Ok(info.name)
 }
 
 pub fn get_dev_trust_level(name: &str) -> Result<Option<u32>> {

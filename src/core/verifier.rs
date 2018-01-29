@@ -16,7 +16,7 @@ const TOKEN_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const TOKEN_VERSION: u32 = 1;
 const HISTORY_COUNT: u32 = 5;
 
-// TODO: Implement !whois command.
+// TODO: Add caching to this module. Extensive caching.
 
 #[derive(Clone, Hash, Debug, PartialOrd, Ord)]
 struct Token([u8; 6]);
@@ -276,7 +276,7 @@ impl Verifier {
     pub fn get_verified_discord_user(&self, user: RobloxUserID) -> Result<Option<UserId>> {
         let conn = self.0.database.connect()?;
         conn.query(
-            "SELECT discord_user_info FROM roblox_user_id WHERE discord_user_info = ?1", user
+            "SELECT discord_user_id FROM discord_user_info WHERE roblox_user_id = ?1", user
         ).get_opt()
     }
 

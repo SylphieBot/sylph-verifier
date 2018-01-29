@@ -12,6 +12,11 @@ use util;
 // TODO: Consider moving error messages back into roles.rs
 // TODO: Support force updating an user.
 
+lazy_static! {
+    static ref MENTION_REGEX: Regex = Regex::new("^<@([0-9]+)>$").unwrap();
+    static ref SNOWFLAKE_REGEX: Regex = Regex::new("^([0-9]+)$").unwrap();
+}
+
 fn get_discord_username(discord_id: UserId) -> String {
     match discord_id.find() {
         Some(x) => x.read().tag(),
@@ -124,11 +129,7 @@ fn find_role(guild_id: GuildId, role_name: &str) -> Result<RoleId> {
     let guild = guild_id.find().chain_err(|| "Guild not found.")?;
     let guild = guild.read();
 
-    lazy_static! {
-        static ref MATCH_ROLE: Regex = Regex::new("^<@([0-9]+)>$").unwrap();
-    }
-
-    if let Some(captures) = MATCH_ROLE.captures(role_name) {
+    if let Some(captures) = MENTION_REGEX.captures(role_name) {
         let role_id_str = captures.get(1).chain_err(|| "No capture found.")?.as_str();
         let role_id = RoleId(role_id_str.parse().to_cmd_err(|| "Role ID too large.")?);
         cmd_ensure!(guild.roles.contains_key(&role_id),
@@ -149,6 +150,57 @@ fn find_role(guild_id: GuildId, role_name: &str) -> Result<RoleId> {
             None => cmd_error!("No role named '{}' found. Note that roles are case sensitive.",
                                role_name),
         }
+    }
+}
+
+fn whois_msg(
+    ctx: &CommandContext, user: User, roblox_id: RobloxUserID, roblox_name: &str
+) -> Result<()> {
+    ctx.respond(format!("{} is verified as {} (https://www.roblox.com/users/{}/profile)",
+                        user.tag(), roblox_name, roblox_id.0))
+}
+fn whois_discord(ctx: &CommandContext, discord_user_id: UserId) -> Result<()> {
+    let user = discord_user_id.get().map_err(Error::from)
+        .status_to_cmd(StatusCode::NotFound, || "That Discord account does not exist.")?;
+    let roblox_user_id = ctx.core.verifier().get_verified_roblox_user(discord_user_id)?;
+    if let Some(roblox_user_id) = roblox_user_id {
+        let roblox_name = roblox_user_id.lookup_username_opt()?;
+        if let Some(roblox_name) = roblox_name {
+            whois_msg(ctx, user, roblox_user_id, &roblox_name)
+        } else {
+            cmd_error!("{} is verified as Roblox User ID #{}, which no longer exists. \
+                        (https://www.roblox.com/users/{}/profile)",
+                       user.tag(), roblox_user_id.0, roblox_user_id.0)
+        }
+    } else {
+        cmd_error!("{} isn't verified.", user.tag())
+    }
+}
+fn whois_roblox(ctx: &CommandContext, roblox_name: &str) -> Result<()> {
+    let roblox_user_id = RobloxUserID::for_username(roblox_name)
+        .to_cmd_err(|| format!("No such Roblox user '{}' exists.", roblox_name))?;
+    let discord_user_id = ctx.core.verifier().get_verified_discord_user(roblox_user_id)?;
+    if let Some(discord_user_id) = discord_user_id {
+        let user = discord_user_id.get().map_err(Error::from).status_to_cmd(StatusCode::NotFound, ||
+            format!("The Discord account verified with '{}' no longer exists.", roblox_name)
+        )?;
+        whois_msg(ctx, user, roblox_user_id, roblox_name)
+    } else {
+        cmd_error!("No Discord user has verified as {} (https://www.roblox.com/users/{}/profile)",
+                   roblox_name, roblox_user_id.0)
+    }
+}
+fn do_whois(ctx: &CommandContext) -> Result<()> {
+    let target_name = ctx.arg(0)?;
+    if let Some(captures) = MENTION_REGEX.captures(target_name) {
+        let user_id_str = captures.get(1).chain_err(|| "No capture found.")?.as_str();
+        let user_id = UserId(user_id_str.parse().to_cmd_err(|| "User ID too large.")?);
+        whois_discord(ctx, user_id)
+    } else if SNOWFLAKE_REGEX.is_match(target_name) {
+        let user_id = UserId(target_name.parse().to_cmd_err(|| "User ID too large.")?);
+        whois_discord(ctx, user_id)
+    } else {
+        whois_roblox(ctx, target_name)
     }
 }
 
@@ -287,6 +339,10 @@ pub const COMMANDS: &[Command] = &[
             ctx.respond("Your roles have been updated.")?;
             Ok(())
         }),
+    Command::new("whois")
+        .help(Some("[discord mention, user id, or roblox username]"),
+              "Verifies a Roblox account to your Discord account.")
+        .exec(do_whois),
     Command::new("verify")
         .help(Some("<roblox username> <verification code>"),
               "Verifies a Roblox account to your Discord account.")

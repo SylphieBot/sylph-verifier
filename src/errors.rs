@@ -1,6 +1,5 @@
 #![allow(non_camel_case_types)]
 
-use hyper::status::StatusCode;
 use serenity::{Error as SerenityError};
 use serenity::model::prelude::*;
 use serenity::prelude::*;
@@ -54,6 +53,9 @@ mod internal {
 // Reexport these types so IDEs pick up on them correctly.
 pub use self::internal::{Error, ErrorKind, Result, ResultExt};
 
+// Reexport this for convinence.
+pub use hyper::status::StatusCode;
+
 impl From<SerenityError> for Error {
     fn from(err: SerenityError) -> Self {
         match err {
@@ -104,12 +106,25 @@ macro_rules! cmd_ensure {
 
 pub trait ResultCmdExt<T> {
     fn cmd_ok(self) -> Result<()>;
+    fn status_to_cmd<F, R: Into<Cow<'static, str>>>(
+        self, code: StatusCode, f: F
+    ) -> Result<T> where F: FnOnce() -> R;
     fn discord_to_cmd(self) -> Result<T>;
 }
 impl <T> ResultCmdExt<T> for Result<T> {
     fn cmd_ok(self) -> Result<()> {
         match self {
             Ok(_) | Err(Error(box (ErrorKind::CommandError(_), _))) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+    fn status_to_cmd<F, R: Into<Cow<'static, str>>>(
+        self, code: StatusCode, f: F
+    ) -> Result<T> where F: FnOnce() -> R {
+        match self {
+            Ok(v) => Ok(v),
+            Err(Error(box (ErrorKind::HttpError(err_code), _))) if code == err_code =>
+                Err(ErrorKind::CommandError(f().into()).into()),
             Err(e) => Err(e),
         }
     }

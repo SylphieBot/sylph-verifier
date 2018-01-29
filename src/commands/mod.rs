@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::str::FromStr;
 
+// TODO: Unify parsing of common types better.
+
 enum CommandFn {
     Normal(fn(&CommandContext) -> Result<()>),
     Discord(fn(&CommandContext, &Context, &Message) -> Result<()>),
