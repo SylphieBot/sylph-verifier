@@ -13,7 +13,7 @@ use util;
 // TODO: Support force updating an user.
 
 lazy_static! {
-    static ref MENTION_REGEX: Regex = Regex::new("^<@([0-9]+)>$").unwrap();
+    static ref MENTION_REGEX: Regex = Regex::new("^<@!?([0-9]+)>$").unwrap();
     static ref SNOWFLAKE_REGEX: Regex = Regex::new("^([0-9]+)$").unwrap();
 }
 
