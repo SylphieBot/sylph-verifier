@@ -340,8 +340,8 @@ pub const COMMANDS: &[Command] = &[
             Ok(())
         }),
     Command::new("whois")
-        .help(Some("[discord mention, user id, or roblox username]"),
-              "Verifies a Roblox account to your Discord account.")
+        .help(Some("<discord mention, user id, or roblox username>"),
+              "Retrieves the Roblox account a Discord account is verified with or vice versa.")
         .exec(do_whois),
     Command::new("verify")
         .help(Some("<roblox username> <verification code>"),
