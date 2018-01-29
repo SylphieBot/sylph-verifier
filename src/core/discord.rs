@@ -157,8 +157,8 @@ impl Handler {
                     core_ref.run_command(command, &ctx);
                 } else {
                     ctx.respond(&format!(
-                        "<@{}> You are already running a command. Please wait for it \
-                         to finish running, then try again.", message.author.id,
+                        "You are already running a command. Please wait for it to finish \
+                         running, then try again.", message.author.id,
                     ))?;
                 };
                 debug!("Command #{} completed.", command_no);
