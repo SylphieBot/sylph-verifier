@@ -115,6 +115,7 @@ impl VerifierCore {
         self.0.discord.on_cleanup_tick();
         self.0.roles.on_cleanup_tick();
         self.0.verify_channel.on_cleanup_tick();
+        self.0.verifier.on_cleanup_tick();
         Ok(())
     }
     fn wait_on_instances(&self) {

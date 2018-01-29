@@ -1,11 +1,12 @@
 use errors::*;
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use reqwest;
 use serenity::model::prelude::*;
 use std::borrow::Borrow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::mem::drop;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -68,7 +69,38 @@ pub fn time_to_i64(time: SystemTime) -> i64 {
     }
 }
 
+// MultiMutex implementation
+pub struct MultiMutexGuard<T: Hash + Eq>(Arc<Mutex<HashSet<T>>>, T);
+impl <T: Hash + Eq> Drop for MultiMutexGuard<T> {
+    fn drop(&mut self) {
+        self.0.lock().remove(&self.1);
+    }
+}
+
+#[derive(Clone)]
+pub struct MultiMutex<T: Hash + Eq>(Arc<Mutex<HashSet<T>>>);
+impl <T: Hash + Eq + Clone> MultiMutex<T> {
+    pub fn new() -> MultiMutex<T> {
+        MultiMutex(Arc::new(Mutex::new(HashSet::new())))
+    }
+
+    pub fn lock(&self, id: T) -> Option<MultiMutexGuard<T>> {
+        let mut lock = self.0.lock();
+        if lock.contains(&id) {
+            None
+        } else {
+            lock.insert(id.clone());
+            Some(MultiMutexGuard(self.0.clone(), id))
+        }
+    }
+
+    pub fn shrink_to_fit(&self) {
+        self.0.lock().shrink_to_fit();
+    }
+}
+
 // Concurrent cache implementation
+// TODO: Add *optional* support for tracking last access in this.
 pub struct ConcurrentCache<K: Clone + Eq + Hash + Sync, V: Sync> {
     data: RwLock<HashMap<K, V>>, create: Box<Fn(&K) -> Result<V> + Send + Sync + 'static>,
 }

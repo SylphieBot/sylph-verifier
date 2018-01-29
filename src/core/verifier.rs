@@ -11,6 +11,7 @@ use sha2::Sha256;
 use std::fmt::{Display, Formatter, Write, Result as FmtResult};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use util::MultiMutex;
 
 const TOKEN_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const TOKEN_VERSION: u32 = 1;
@@ -244,6 +245,7 @@ pub enum VerifyResult {
 
 struct VerifierData {
     config: ConfigManager, database: Database, token_ctx: RwLock<TokenContext>,
+    discord_lock: MultiMutex<UserId>, roblox_lock: MultiMutex<RobloxUserID>,
 }
 #[derive(Clone)]
 pub struct Verifier(Arc<VerifierData>);
@@ -251,7 +253,10 @@ impl Verifier {
     pub fn new(config: ConfigManager, database: Database) -> Result<Verifier> {
         let ctx = TokenContext::from_db(&database.connect()?,
                                         config.get(None, ConfigKeys::TokenValiditySeconds)?)?;
-        Ok(Verifier(Arc::new(VerifierData { config, database, token_ctx: RwLock::new(ctx), })))
+        Ok(Verifier(Arc::new(VerifierData {
+            config, database, token_ctx: RwLock::new(ctx),
+            discord_lock: MultiMutex::new(), roblox_lock: MultiMutex::new(),
+        })))
     }
 
     pub fn rekey(&self, force: bool) -> Result<bool> {
@@ -288,123 +293,124 @@ impl Verifier {
         debug!("Starting verification attempt: discord id {} -> roblox id {}",
                discord_id.0, roblox_id.0);
 
+        let discord_lock = self.0.discord_lock.lock(discord_id);
+        cmd_ensure!(discord_lock.is_some(),
+                    "Please wait for your last verification attempt to finish.");
+
+        let roblox_lock = self.0.roblox_lock.lock(roblox_id);
+        cmd_ensure!(roblox_lock.is_some(),
+                    "Someone else is currently trying to verify as that Roblox account. \
+                     Please wait for their attempt to finish.");
+
         // Check cooldown
-        let result = conn.transaction_immediate(|| {
-            let attempt_info = conn.query(
-                "SELECT attempt_count, last_attempt FROM verification_cooldown \
-                 WHERE discord_user_id = ?1", discord_id
-            ).get_opt::<(u32, SystemTime)>()?;
-            let new_attempt_count = if let Some((attempt_count, last_attempt)) = attempt_info {
-                let max_attempts = self.0.config.get(None, ConfigKeys::VerificationAttemptLimit)?;
-                let cooldown = self.0.config.get(None, ConfigKeys::VerificationCooldownSeconds)?;
-                let cooldown_ends = last_attempt + Duration::from_secs(cooldown);
-                if attempt_count >= max_attempts && SystemTime::now() < cooldown_ends {
-                    return Ok(VerifyResult::TooManyAttempts {
-                        max_attempts, cooldown, cooldown_ends
-                    })
-                }
-                attempt_count + 1
-            } else {
-                1
-            };
-            conn.execute(
-                "REPLACE INTO verification_cooldown (\
-                    discord_user_id, last_attempt, attempt_count\
-                ) VALUES (?1, ?2, ?3)", (discord_id, SystemTime::now(), new_attempt_count)
-            )?;
-            Ok(VerifyResult::VerificationOk)
-        })?;
-        match result {
-            VerifyResult::VerificationOk => { }
-            _ => return Ok(result),
-        }
+        let attempt_info = conn.query(
+            "SELECT attempt_count, last_attempt FROM verification_cooldown \
+             WHERE discord_user_id = ?1", discord_id
+        ).get_opt::<(u32, SystemTime)>()?;
+        let new_attempt_count = if let Some((attempt_count, last_attempt)) = attempt_info {
+            let max_attempts = self.0.config.get(None, ConfigKeys::VerificationAttemptLimit)?;
+            let cooldown = self.0.config.get(None, ConfigKeys::VerificationCooldownSeconds)?;
+            let cooldown_ends = last_attempt + Duration::from_secs(cooldown);
+            if attempt_count >= max_attempts && SystemTime::now() < cooldown_ends {
+                return Ok(VerifyResult::TooManyAttempts {
+                    max_attempts, cooldown, cooldown_ends
+                })
+            }
+            attempt_count + 1
+        } else {
+            1
+        };
+        conn.execute(
+            "REPLACE INTO verification_cooldown (\
+                discord_user_id, last_attempt, attempt_count\
+            ) VALUES (?1, ?2, ?3)", (discord_id, SystemTime::now(), new_attempt_count)
+        )?;
 
         // Check token
-        let result = conn.transaction_immediate(|| {
-            let token_ctx = self.0.token_ctx.read();
-            match token_ctx.check_token(roblox_id, token)? {
-                TokenStatus::Verified { key_id, epoch } => {
-                    let last_key = conn.query(
-                        "SELECT last_key_id, last_key_epoch FROM roblox_user_info \
-                         WHERE roblox_user_id = ?1", roblox_id
-                    ).get_opt::<(u64, i64)>()?;
-                    if let Some((last_id, last_epoch)) = last_key {
-                        if last_id >= key_id && last_epoch >= epoch {
-                            return Ok(VerifyResult::TokenAlreadyUsed)
-                        }
+        let token_ctx = self.0.token_ctx.read();
+        match token_ctx.check_token(roblox_id, token)? {
+            TokenStatus::Verified { key_id, epoch } => {
+                let last_key = conn.query(
+                    "SELECT last_key_id, last_key_epoch FROM roblox_user_info \
+                     WHERE roblox_user_id = ?1", roblox_id
+                ).get_opt::<(u64, i64)>()?;
+                if let Some((last_id, last_epoch)) = last_key {
+                    if last_id >= key_id && last_epoch >= epoch {
+                        return Ok(VerifyResult::TokenAlreadyUsed)
                     }
-                    conn.execute(
-                        "REPLACE INTO roblox_user_info \
-                             (roblox_user_id, last_key_id, last_key_epoch, last_updated) \
-                         VALUES (?1, ?2, ?3, ?4)", (roblox_id, key_id, epoch, SystemTime::now()),
-                    )?;
                 }
-                TokenStatus::Outdated(_) =>
-                    return Ok(VerifyResult::VerificationPlaceOutdated),
-                TokenStatus::NotVerified =>
-                    return Ok(VerifyResult::InvalidToken),
+                conn.execute(
+                    "REPLACE INTO roblox_user_info \
+                         (roblox_user_id, last_key_id, last_key_epoch, last_updated) \
+                     VALUES (?1, ?2, ?3, ?4)", (roblox_id, key_id, epoch, SystemTime::now()),
+                )?;
             }
-            Ok(VerifyResult::VerificationOk)
-        })?;
-        match result {
-            VerifyResult::VerificationOk => { }
-            _ => return Ok(result),
+            TokenStatus::Outdated(_) =>
+                return Ok(VerifyResult::VerificationPlaceOutdated),
+            TokenStatus::NotVerified =>
+                return Ok(VerifyResult::InvalidToken),
         }
 
         // Attempt to verify user
         let allow_reverify_discord = self.0.config.get(None, ConfigKeys::AllowReverifyDiscord)?;
         let allow_reverify_roblox = self.0.config.get(None, ConfigKeys::AllowReverifyRoblox)?;
-        conn.transaction_immediate(|| {
-            let check_discord = conn.query(
-                "SELECT roblox_user_id, last_updated FROM discord_user_info \
-                 WHERE discord_user_id = ?1", discord_id
-            ).get_opt::<(Option<RobloxUserID>, SystemTime)>()?;
-            if let Some((current_id, last_updated)) = check_discord {
-                if !allow_reverify_discord {
-                    if let Some(current_id) = current_id {
-                        return Ok(VerifyResult::SenderVerifiedAs { other_roblox_id: current_id })
-                    }
-                }
-                if current_id == Some(roblox_id) {
-                    return Ok(VerifyResult::SenderVerifiedAs { other_roblox_id: roblox_id })
-                }
-
-                let cooldown =
-                    self.0.config.get(None, ConfigKeys::ReverificationCooldownSeconds)?;
-                let cooldown_ends = last_updated + Duration::from_secs(cooldown);
-                if SystemTime::now() < cooldown_ends {
-                    return Ok(VerifyResult::ReverifyOnCooldown { cooldown, cooldown_ends })
+        let check_discord = conn.query(
+            "SELECT roblox_user_id, last_updated FROM discord_user_info \
+             WHERE discord_user_id = ?1", discord_id
+        ).get_opt::<(Option<RobloxUserID>, SystemTime)>()?;
+        if let Some((current_id, last_updated)) = check_discord {
+            if !allow_reverify_discord {
+                if let Some(current_id) = current_id {
+                    return Ok(VerifyResult::SenderVerifiedAs { other_roblox_id: current_id })
                 }
             }
-
-            let check_roblox = conn.query(
-                "SELECT discord_user_id FROM discord_user_info \
-                 WHERE roblox_user_id = ?1", roblox_id,
-            ).get_opt::<UserId>()?;
-            if let Some(current_id) = check_roblox {
-                if current_id != discord_id {
-                    if !allow_reverify_roblox {
-                        return Ok(VerifyResult::RobloxAccountVerifiedTo { other_discord_id: current_id })
-                    }
-
-                    // TODO: Forcefully update this other person's roles somehow.
-                    conn.execute(
-                        "UPDATE discord_user_info SET roblox_user_id = NULL \
-                         WHERE roblox_user_id = ?1", roblox_id,
-                    )?;
-                }
+            if current_id == Some(roblox_id) {
+                return Ok(VerifyResult::SenderVerifiedAs { other_roblox_id: roblox_id })
             }
 
-            conn.execute(
-                "REPLACE INTO discord_user_info (discord_user_id, roblox_user_id, last_updated) \
-                 VALUES (?1, ?2, ?3)", (discord_id, roblox_id, SystemTime::now()),
-            )?;
+            let cooldown =
+                self.0.config.get(None, ConfigKeys::ReverificationCooldownSeconds)?;
+            let cooldown_ends = last_updated + Duration::from_secs(cooldown);
+            if SystemTime::now() < cooldown_ends {
+                return Ok(VerifyResult::ReverifyOnCooldown { cooldown, cooldown_ends })
+            }
+        }
 
-            Ok(VerifyResult::VerificationOk)
-        })
+        let check_roblox = conn.query(
+            "SELECT discord_user_id FROM discord_user_info \
+             WHERE roblox_user_id = ?1", roblox_id,
+        ).get_opt::<UserId>()?;
+        if let Some(current_id) = check_roblox {
+            // TODO: Add some locking here in case the current_id is verifying currently.
+            if current_id != discord_id {
+                if !allow_reverify_roblox {
+                    return Ok(VerifyResult::RobloxAccountVerifiedTo {
+                        other_discord_id: current_id
+                    })
+                }
+
+                // TODO: Forcefully update this other person's roles somehow.
+                conn.execute(
+                    "UPDATE discord_user_info SET roblox_user_id = NULL \
+                     WHERE roblox_user_id = ?1", roblox_id,
+                )?;
+            }
+        }
+
+        conn.execute(
+            "REPLACE INTO discord_user_info (discord_user_id, roblox_user_id, last_updated) \
+             VALUES (?1, ?2, ?3)", (discord_id, roblox_id, SystemTime::now()),
+        )?;
+
+        Ok(VerifyResult::VerificationOk)
     }
 
     pub fn add_config<'a>(&self, config: &'a mut Vec<LuaConfigEntry>) {
         self.0.token_ctx.read().current.add_config(config)
+    }
+
+    pub fn on_cleanup_tick(&self) {
+        self.0.discord_lock.shrink_to_fit();
+        self.0.roblox_lock.shrink_to_fit();
     }
 }

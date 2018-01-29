@@ -13,12 +13,12 @@ use serenity::client::bridge::gateway::ShardManager;
 use serenity::model::prelude::*;
 use serenity::prelude::*;
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;
 use std::time::Duration;
 use util;
+use util::MultiMutex;
 
 // TODO: Batch delete operations.
 
@@ -75,34 +75,9 @@ const STATUS_RUNNING : u8 = 2;
 const STATUS_SHUTDOWN: u8 = 3;
 const STATUS_DROPPED : u8 = 4;
 
-struct CommandMutexGuard(Arc<Mutex<HashSet<UserId>>>, UserId);
-impl Drop for CommandMutexGuard {
-    fn drop(&mut self) {
-        self.0.lock().remove(&self.1);
-    }
-}
-
-#[derive(Clone)]
-struct CommandMutex(Arc<Mutex<HashSet<UserId>>>);
-impl CommandMutex {
-    fn lock(&self, id: UserId) -> Option<CommandMutexGuard> {
-        let mut lock = self.0.lock();
-        if lock.contains(&id) {
-            None
-        } else {
-            lock.insert(id);
-            Some(CommandMutexGuard(self.0.clone(), id))
-        }
-    }
-
-    fn shrink_to_fit(&self) {
-        self.0.lock().shrink_to_fit();
-    }
-}
-
 struct DiscordBotSharedData {
     config: ConfigManager, core_ref: CoreRef, roles: RoleManager, tasks: TaskManager,
-    verify_channel: VerificationChannelManager, is_in_command: CommandMutex,
+    verify_channel: VerificationChannelManager, is_in_command: MultiMutex<UserId>,
 }
 
 struct Handler {
@@ -392,8 +367,7 @@ impl DiscordManager {
         DiscordManager {
             bot: Mutex::new(BotStatus::NotConnected), shutdown: AtomicBool::new(false),
             shared: Arc::new(DiscordBotSharedData {
-                config, core_ref, roles, tasks, verify_channel,
-                is_in_command: CommandMutex(Arc::new(Mutex::new(HashSet::new()))),
+                config, core_ref, roles, tasks, verify_channel, is_in_command: MultiMutex::new(),
             }),
         }
     }
