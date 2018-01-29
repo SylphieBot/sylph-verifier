@@ -156,10 +156,10 @@ impl Handler {
                 if let Some(_lock) = is_in_command.lock(message.author.id) {
                     core_ref.run_command(command, &ctx);
                 } else {
-                    ctx.respond(&format!(
+                    ctx.respond(
                         "You are already running a command. Please wait for it to finish \
-                         running, then try again.", message.author.id,
-                    ))?;
+                         running, then try again."
+                    )?;
                 };
                 debug!("Command #{} completed.", command_no);
                 Ok(())
