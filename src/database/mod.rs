@@ -251,16 +251,19 @@ impl DatabaseConnection {
 }
 
 struct Migration {
-    id: u32, name: &'static str, source: &'static str
+    from: u32, to: u32, name: &'static str, source: &'static str
 }
 macro_rules! migration {
-    ($id:expr, $file:expr) => {
-        Migration { id: $id, name: $file, source: include_str!($file) }
+    ($from:expr, $to:expr, $file:expr) => {
+        Migration { from: $from, to: $to, name: $file, source: include_str!($file) }
     }
 }
 static MIGRATIONS: &'static [Migration] = &[
-    migration!(1, "version_1.sql"),
+    migration!(0, 1, "version_0_to_1.sql"),
 ];
+const CURRENT_VERSION: u32 = 1;
+const FUTURE_VERSION_ERR: &str = "This database was created for a future version of this bot. \
+                                  Please restore an older version of the database from a backup.";
 
 #[derive(Clone)]
 pub struct Database {
@@ -284,28 +287,71 @@ impl Database {
     fn init_db(&self) -> Result<()> {
         let conn = self.connect()?;
 
-        let created_count = conn.execute(
-            "CREATE TABLE IF NOT EXISTS sylph_verifier_migrations (id INTEGER PRIMARY KEY);", ()
-        )?;
-        if created_count != 0 {
-            debug!("Created migrations tracking table.");
-        }
+        conn.transaction_exclusive(|| {
+            let meta_table_exists = conn.query(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='table' AND name='sylph_verifier_meta';", (),
+            ).get::<u32>()? != 0;
+            if !meta_table_exists {
+                debug!("Setting up Sylph-Verifier database metadata.");
+                conn.execute_batch(
+                    "CREATE TABLE sylph_verifier_meta (\
+                         key TEXT PRIMARY KEY, value BLOB NOT NULL\
+                     ) WITHOUT ROWID;\
+                     INSERT INTO sylph_verifier_meta (key, value) VALUES ('meta_version', 1);\
+                     INSERT INTO sylph_verifier_meta (key, value) VALUES ('schema_version', 0);"
+                )?;
 
-        let migrations_ran = conn.query(
-            "SELECT id FROM sylph_verifier_migrations", ()
-        ).get_all::<u32>()?;
-
-        // TODO: Backup old database
-        for migration in MIGRATIONS {
-            if !migrations_ran.contains(&migration.id) {
-                debug!("Running migration '{}'", migration.name);
-                conn.transaction_exclusive(|| {
-                    conn.execute("INSERT INTO sylph_verifier_migrations (id) VALUES (?1)",
-                                 migration.id)?;
-                    conn.execute_batch(migration.source)?;
-                    Ok(())
-                })?;
+                // TODO: Backup old database.
+                // TODO: Temporary code to migrate dev versions currently in production.
+                let old_migrations_exist = conn.query(
+                    "SELECT COUNT(*) FROM sqlite_master \
+                     WHERE type='table' AND name='sylph_verifier_migrations';", (),
+                ).get::<u32>()? != 0;
+                if old_migrations_exist {
+                    debug!("Migrating from legacy migration tracking.");
+                    conn.execute_batch(
+                        "DROP TABLE sylph_verifier_migrations;\
+                         UPDATE sylph_verifier_meta SET value = 1 WHERE key = 'schema_version';"
+                    )?;
+                }
             }
+
+            Ok(())
+        })?;
+
+        let meta_version = conn.query(
+            "SELECT value FROM sylph_verifier_meta WHERE key = 'meta_version';", ()
+        ).get::<u32>()?;
+        ensure!(meta_version == 1, FUTURE_VERSION_ERR);
+
+        let mut to_run = Vec::new();
+        let mut current_version = conn.query(
+            "SELECT value FROM sylph_verifier_meta WHERE key = 'schema_version';", ()
+        ).get::<u32>()?;
+        ensure!(current_version <= CURRENT_VERSION, FUTURE_VERSION_ERR);
+
+        // TODO: Backup old database.
+        for migration in MIGRATIONS {
+            if migration.from == current_version {
+                to_run.push(migration);
+                current_version = migration.to;
+            }
+        }
+        if current_version != CURRENT_VERSION {
+            bail!("No migration found from version {} -> {}. Maybe this database was created by \
+                   a development version of the bot?", current_version, CURRENT_VERSION);
+        }
+        for migration in to_run {
+            debug!("Running migration '{}'", migration.name);
+            conn.transaction_exclusive(|| {
+                conn.execute(
+                    "UPDATE sylph_verifier_meta SET value = ?1 WHERE key = \"schema_version\";",
+                    migration.to,
+                )?;
+                conn.execute_batch(migration.source)?;
+                Ok(())
+            })?;
         }
 
         conn.checkpoint()?;
