@@ -130,6 +130,15 @@ impl Handler {
         let head = format!("{} in {}", message.author.tag(), Self::context_str(&channel));
         debug!("Assigning ID #{} to command from {}: {:?}", command_no, head, message.content);
 
+        let user_id = serenity::CACHE.read().user.id;
+        if let Channel::Guild(ref channel) = channel {
+            let channel = channel.read();
+            if !channel.permissions_for(user_id)?.contains(Permissions::SEND_MESSAGES) {
+                debug!("Command ID #{} canceled (No Send Messages permission.)", command_no);
+                return Ok(())
+            }
+        }
+
         let core_ref = self.shared.core_ref.clone();
         let bot_owner_id = self.shared.config.get(None, ConfigKeys::BotOwnerId)?.map(UserId);
         let is_in_command = self.shared.is_in_command.clone();
