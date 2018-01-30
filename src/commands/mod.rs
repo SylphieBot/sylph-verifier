@@ -303,7 +303,8 @@ impl <'a> CommandContext<'a> {
         }
         let perms = to_serenity_permissions(perms);
         self.privilege_level >= PrivilegeLevel::GuildOwner ||
-            self.user_guild_permissions().ok().map_or(false, |x| x.contains(perms))
+            self.user_guild_permissions().ok().map_or(false, |x|
+                x.contains(perms) || x.contains(Permissions::ADMINISTRATOR))
     }
 
     fn not_enough_arguments(&self) -> String {
