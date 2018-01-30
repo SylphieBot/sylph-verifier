@@ -62,34 +62,8 @@ impl Display for Token {
     }
 }
 
-#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
-pub enum RekeyReason {
-    InitialKey, ManualRekey, OutdatedVersion, TimeIncrementChanged,
-}
-impl ToSql for RekeyReason {
-    fn to_sql(&self) -> Result<ToSqlOutput> {
-        Ok(ValueRef::Integer(match *self {
-            RekeyReason::InitialKey           => 0,
-            RekeyReason::ManualRekey          => 1,
-            RekeyReason::OutdatedVersion      => 2,
-            RekeyReason::TimeIncrementChanged => 3,
-        }).into())
-    }
-}
-impl FromSql for RekeyReason {
-    fn from_sql(value: ValueRef) -> Result<Self> {
-        match value {
-            ValueRef::Integer(0) => Ok(RekeyReason::InitialKey),
-            ValueRef::Integer(1) => Ok(RekeyReason::ManualRekey),
-            ValueRef::Integer(2) => Ok(RekeyReason::OutdatedVersion),
-            ValueRef::Integer(3) => Ok(RekeyReason::TimeIncrementChanged),
-            unk => bail!("Unknown SQLite value: {:?}", unk),
-        }
-    }
-}
-
 struct TokenParameters {
-    id: u64, key: Vec<u8>, time_increment: u32, version: u32, change_reason: RekeyReason,
+    id: u64, key: Vec<u8>, time_increment: u32, version: u32,
 }
 impl TokenParameters {
     fn add_config<'a>(&self, config: &mut Vec<LuaConfigEntry<'a>>) {
@@ -139,15 +113,15 @@ impl TokenParameters {
 impl FromSqlRow for TokenParameters {
     fn from_sql_row(row: Row) -> Result<Self> {
         let (
-            id, key, time_increment, version, change_reason
-        ): (u64, Vec<u8>, u32, u32, RekeyReason) = FromSqlRow::from_sql_row(row)?;
-        Ok(TokenParameters { id, key, time_increment, version, change_reason })
+            id, key, time_increment, version
+        ): (u64, Vec<u8>, u32, u32) = FromSqlRow::from_sql_row(row)?;
+        Ok(TokenParameters { id, key, time_increment, version })
     }
 }
 
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
 pub enum TokenStatus {
-    Verified { key_id: u64, epoch: i64 }, Outdated(RekeyReason), NotVerified,
+    Verified { key_id: u64, epoch: i64 }, Outdated, NotVerified,
 }
 
 struct TokenContext {
@@ -156,7 +130,7 @@ struct TokenContext {
 impl TokenContext {
     fn from_db_internal(conn: &DatabaseConnection) -> Result<Option<TokenContext>> {
         let mut results = conn.query(
-            "SELECT id, key, time_increment, version, change_reason FROM verification_keys \
+            "SELECT id, key, time_increment, version FROM verification_keys \
              ORDER BY id DESC LIMIT ?1",
             1 + HISTORY_COUNT,
         ).get_all::<TokenParameters>()?;
@@ -167,8 +141,7 @@ impl TokenContext {
             Ok(Some(TokenContext { current: results.pop().unwrap(), history }))
         }
     }
-    fn new_in_db(conn: &DatabaseConnection, time_increment: u32,
-                 change_reason: RekeyReason) -> Result<TokenContext> {
+    fn new_in_db(conn: &DatabaseConnection, time_increment: u32) -> Result<TokenContext> {
         let mut rng = OsRng::new().chain_err(|| "OsRng creation failed")?;
         let mut key = Vec::new();
         for _ in 0..16 {
@@ -180,17 +153,15 @@ impl TokenContext {
         }
 
         conn.execute(
-            "INSERT INTO verification_keys (\
-                key, time_increment, version, change_reason, last_updated\
-            ) VALUES (?1, ?2, ?3, ?4, ?5)",
-            (key, time_increment, TOKEN_VERSION, change_reason, SystemTime::now())
+            "INSERT INTO verification_keys (key, time_increment, version) VALUES (?1, ?2, ?3)",
+            (key, time_increment, TOKEN_VERSION)
         )?;
         Ok(TokenContext::from_db_internal(conn)?.chain_err(|| "Could not get newly created key!")?)
     }
     fn rekey(conn: &DatabaseConnection, time_increment: u32) -> Result<TokenContext> {
         info!("Regenerating token key due to user request.");
         conn.transaction_immediate(|| {
-            TokenContext::new_in_db(conn, time_increment, RekeyReason::ManualRekey)
+            TokenContext::new_in_db(conn, time_increment)
         })
     }
     fn from_db(conn: &DatabaseConnection, time_increment: u32) -> Result<TokenContext> {
@@ -200,21 +171,18 @@ impl TokenContext {
                     if x.current.time_increment != time_increment {
                         info!("Token key in database has a different time increment, \
                                regenerating...");
-                        TokenContext::new_in_db(conn, time_increment,
-                                                RekeyReason::TimeIncrementChanged)
+                        TokenContext::new_in_db(conn, time_increment)
                     } else if x.current.version != TOKEN_VERSION {
                         info!("Token key in database is for an older version, \
                                regenerating...");
-                        TokenContext::new_in_db(conn, time_increment,
-                                                RekeyReason::OutdatedVersion)
+                        TokenContext::new_in_db(conn, time_increment)
                     } else {
                         Ok(x)
                     }
                 },
                 None => {
                     info!("No token keys in database, generating new key...");
-                    TokenContext::new_in_db(conn, time_increment,
-                                            RekeyReason::InitialKey)
+                    TokenContext::new_in_db(conn, time_increment)
                 },
             }
         })
@@ -227,7 +195,7 @@ impl TokenContext {
         }
         for param in &self.history {
             if param.check_token(user, &token)?.is_some() {
-                return Ok(TokenStatus::Outdated(self.current.change_reason.clone()))
+                return Ok(TokenStatus::Outdated)
             }
         }
         Ok(TokenStatus::NotVerified)
@@ -345,7 +313,7 @@ impl Verifier {
                      VALUES (?1, ?2, ?3, ?4)", (roblox_id, key_id, epoch, SystemTime::now()),
                 )?;
             }
-            TokenStatus::Outdated(_) =>
+            TokenStatus::Outdated =>
                 return Ok(VerifyResult::VerificationPlaceOutdated),
             TokenStatus::NotVerified =>
                 return Ok(VerifyResult::InvalidToken),

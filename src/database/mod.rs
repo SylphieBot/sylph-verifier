@@ -260,8 +260,9 @@ macro_rules! migration {
 }
 static MIGRATIONS: &'static [Migration] = &[
     migration!(0, 1, "version_0_to_1.sql"),
+    migration!(1, 2, "version_1_to_2.sql"),
 ];
-const CURRENT_VERSION: u32 = 1;
+const CURRENT_VERSION: u32 = 2;
 const FUTURE_VERSION_ERR: &str = "This database was created for a future version of this bot. \
                                   Please restore an older version of the database from a backup.";
 
@@ -344,14 +345,13 @@ impl Database {
         }
         for migration in to_run {
             debug!("Running migration '{}'", migration.name);
-            conn.transaction_exclusive(|| {
-                conn.execute(
-                    "UPDATE sylph_verifier_meta SET value = ?1 WHERE key = \"schema_version\";",
-                    migration.to,
-                )?;
-                conn.execute_batch(migration.source)?;
-                Ok(())
-            })?;
+
+            // We don't execute this in a transaction to allow the use of PRAGMA foreign_key
+            conn.execute_batch(migration.source)?;
+            conn.execute(
+                "UPDATE sylph_verifier_meta SET value = ?1 WHERE key = \"schema_version\";",
+                migration.to,
+            )?;
         }
 
         conn.checkpoint()?;

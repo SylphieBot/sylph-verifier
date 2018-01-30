@@ -21,7 +21,7 @@ mod verifier;
 pub use self::config::{ConfigManager, ConfigKey, ConfigKeys};
 pub use self::roles::{RoleManager, AssignedRole, ConfiguredRole, SetRolesStatus};
 pub use self::verification_channel::VerificationChannelManager;
-pub use self::verifier::{Verifier, VerifyResult, TokenStatus, RekeyReason};
+pub use self::verifier::{Verifier, VerifyResult, TokenStatus};
 
 use self::discord::DiscordManager;
 use self::place::PlaceManager;
