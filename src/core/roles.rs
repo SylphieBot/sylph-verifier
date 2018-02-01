@@ -405,7 +405,7 @@ impl RoleManager {
                 self.assign_roles(guild, discord_id, None)
             } else {
                 let member = guild.member(discord_id)?;
-                info!("User {} is not verified. Not changing roles.", member.distinct());
+                trace!("User {} is not verified. Not changing roles.", member.distinct());
                 Ok(SetRolesStatus::NotSet)
             }
         }
