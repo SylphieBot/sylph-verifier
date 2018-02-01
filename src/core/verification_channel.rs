@@ -101,15 +101,12 @@ impl VerificationChannelManager {
 
     pub fn verify_instructions(&self) -> Result<String> {
         if let Some(place_id) = self.0.config.get(None, ConfigKeys::PlaceID)? {
-            let prefix = self.0.config.get(None, ConfigKeys::CommandPrefix)?;
             Ok(format!("To verify your Roblox account with your Discord account, please \
-                        follow the following instructions:\n\
-                        • Visit this Roblox place as the account you want to verify as: \
-                          <https://roblox.com/--place?id={}>\n\
-                        • Type the command it shows in the oval box into this channel. It will \
-                          look like `{}verify YourUsername ABCDEF`.\n\
-                        • Your roles will be set according to your Roblox account.",
-                       place_id, prefix))
+                        follow these instructions:\n\
+                        • Visit <https://roblox.com/--place?id={}> as the account you want to \
+                          verify as.\n\
+                        • Type the command it shows in the oval box into this channel.",
+                       place_id))
         } else {
             error!("No place ID set! Please upload the place file to Roblox, and use \
                     \"set_global place_id [your place id]\".");
