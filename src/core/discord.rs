@@ -148,7 +148,8 @@ impl Handler {
         let (is_verification_channel, delete_in) = match guild_id {
             Some(guild_id) => (
                 self.shared.verify_channel.is_verification_channel(guild_id, message.channel_id)?,
-                self.shared.config.get(Some(guild_id), ConfigKeys::VerificationChannelDeleteSeconds)?,
+                self.shared.config.get(Some(guild_id),
+                                       ConfigKeys::VerificationChannelDeleteSeconds)?,
             ),
             None => (false, 0),
         };
@@ -200,7 +201,7 @@ impl EventHandler for Handler {
                   ready.user.id, permissions.bits());
         }
 
-        error_report::catch_error(||
+        self.shared.tasks.dispatch_task(||
             self.shared.verify_channel.check_verification_channels_ready(&ready)
         ).ok();
     }
@@ -217,7 +218,7 @@ impl EventHandler for Handler {
         let user_id = serenity::CACHE.read().user.id;
 
         if let Some(guild_id) = guild_id {
-            error_report::catch_error(|| {
+            self.shared.tasks.dispatch_task(|| {
                 self.shared.roles.check_roles_update_msg(guild_id, message.author.id)?;
                 if message.author.id != user_id {
                     self.shared.verify_channel.check_verification_channel_msg(guild_id, &message)?;
@@ -256,13 +257,13 @@ impl EventHandler for Handler {
     }
 
     fn guild_member_addition(&self, _: Context, guild_id: GuildId, member: Member) {
-        error_report::catch_error(||
+        self.shared.tasks.dispatch_task(||
             self.shared.roles.check_roles_update_join(guild_id, member)
-        ).ok();
+        )
     }
 
     fn guild_create(&self, _: Context, guild: Guild, _: bool) {
-        error_report::catch_error(||
+        self.shared.tasks.dispatch_task(||
             self.shared.verify_channel.check_guild_create(guild.id)
         ).ok();
     }
