@@ -59,8 +59,10 @@ fn do_verify(ctx: &CommandContext, _: &Context, msg: &Message) -> Result<()> {
                     ctx.respond("Your roles have been set.")?,
                 SetRolesStatus::IsAdmin =>
                     ctx.respond("Your roles have been set. Note that your nickname has not been \
-                                 set, as you outrank the bot's roles, and this bot does not have \
-                                 permission to edit your nickname.")?,
+                                 set as this bot does not have permission to edit it.")?,
+                SetRolesStatus::NotSet  =>
+                    // This case shouldn't actually happen.
+                    ctx.respond("Your roles were not set. Please contact a server administrator.")?,
             }
             Ok(())
         }
@@ -335,7 +337,9 @@ pub const COMMANDS: &[Command] = &[
                 ctx.core.config().get(None, ConfigKeys::MinimumUpdateCooldownSeconds)?,
                 ctx.core.config().get(Some(guild_id), ConfigKeys::UpdateCooldownSeconds)?,
             );
-            ctx.core.roles().update_user_with_cooldown(guild_id, msg.author.id, cooldown, true)?;
+            ctx.core.roles().update_user_with_cooldown(
+                guild_id, msg.author.id, cooldown, true, false,
+            )?;
             ctx.respond("Your roles have been updated.")?;
             Ok(())
         }),

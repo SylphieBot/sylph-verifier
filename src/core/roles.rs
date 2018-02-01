@@ -39,7 +39,7 @@ pub struct AssignedRole {
     pub rule: String, pub role_id: RoleId, pub is_assigned: bool,
 }
 pub enum SetRolesStatus {
-    Success, IsAdmin,
+    Success, IsAdmin, NotSet,
 }
 
 struct RoleManagerData {
@@ -395,8 +395,20 @@ impl RoleManager {
         })
     }
 
-    pub fn update_user(&self, guild: GuildId, discord_id: UserId) -> Result<SetRolesStatus> {
-        self.assign_roles(guild, discord_id, self.0.verifier.get_verified_roblox_user(discord_id)?)
+    pub fn update_user(
+        &self, guild: GuildId, discord_id: UserId, update_unverified: bool,
+    ) -> Result<SetRolesStatus> {
+        if let Some(roblox_id) = self.0.verifier.get_verified_roblox_user(discord_id)? {
+            self.assign_roles(guild, discord_id, Some(roblox_id))
+        } else {
+            if update_unverified {
+                self.assign_roles(guild, discord_id, None)
+            } else {
+                let member = guild.member(discord_id)?;
+                info!("User {} is not verified. Not changing roles.", member.distinct());
+                Ok(SetRolesStatus::NotSet)
+            }
+        }
     }
 
     fn get_cooldown_cache(
@@ -410,6 +422,7 @@ impl RoleManager {
     }
     pub fn update_user_with_cooldown(
         &self, guild_id: GuildId, user_id: UserId, cooldown: u64, is_manual: bool,
+        update_unverified: bool,
     ) -> Result<SetRolesStatus> {
         let now = SystemTime::now();
         let guild_cache = self.0.update_cache.read(&guild_id)?;
@@ -432,7 +445,7 @@ impl RoleManager {
             debug!("Manually updating roles for <@{}> in {}.", user_id, guild_id);
         }
 
-        let result = self.update_user(guild_id, user_id)?;
+        let result = self.update_user(guild_id, user_id, update_unverified)?;
         self.0.database.connect()?.execute(
             "REPLACE INTO roles_last_updated (\
                 discord_guild_id, discord_user_id, is_manual, last_updated\
@@ -457,37 +470,43 @@ impl RoleManager {
     }
 
     pub fn check_roles_update_msg(&self, guild_id: GuildId, user_id: UserId) -> Result<()> {
-        let set_roles_on_join =
-            self.0.config.get(None, ConfigKeys::AllowEnableAutoUpdate)? &&
-            self.0.config.get(Some(guild_id), ConfigKeys::EnableAutoUpdate)?;
-        if set_roles_on_join {
-            let auto_update_cooldown = max(
-                self.0.config.get(None, ConfigKeys::MinimumAutoUpdateCooldownSeconds)?,
-                self.0.config.get(Some(guild_id), ConfigKeys::AutoUpdateCooldownSeconds)?
-            );
-            let roles = self.clone();
-            self.0.tasks.dispatch_task(move |_| {
-                roles.update_user_with_cooldown(
-                    guild_id, user_id, auto_update_cooldown, false
-                ).discord_to_cmd().cmd_ok()?;
-                Ok(())
-            })
+        if user_id != serenity::CACHE.read().user.id {
+            let set_roles_on_join =
+                self.0.config.get(None, ConfigKeys::AllowEnableAutoUpdate)? &&
+                self.0.config.get(Some(guild_id), ConfigKeys::EnableAutoUpdate)?;
+            if set_roles_on_join {
+                let auto_update_cooldown = max(
+                    self.0.config.get(None, ConfigKeys::MinimumAutoUpdateCooldownSeconds)?,
+                    self.0.config.get(Some(guild_id), ConfigKeys::AutoUpdateCooldownSeconds)?
+                );
+                let update_unverified =
+                    self.0.config.get(Some(guild_id), ConfigKeys::EnableAutoUpdateUnverified)?;
+                let roles = self.clone();
+                self.0.tasks.dispatch_task(move |_| {
+                    roles.update_user_with_cooldown(
+                        guild_id, user_id, auto_update_cooldown, false, update_unverified,
+                    ).discord_to_cmd().cmd_ok()?;
+                    Ok(())
+                })
+            }
         }
         Ok(())
     }
     pub fn check_roles_update_join(&self, guild_id: GuildId, member: Member) -> Result<()> {
-        let set_roles_on_join =
-            self.0.config.get(None, ConfigKeys::AllowSetRolesOnJoin)? &&
-            self.0.config.get(Some(guild_id), ConfigKeys::SetRolesOnJoin)?;
-        if set_roles_on_join {
-            let roles = self.clone();
-            let user_id = member.user.read().id;
-            self.0.tasks.dispatch_task(move |_| {
-                roles.update_user_with_cooldown(
-                    guild_id, user_id, 0, false
-                ).discord_to_cmd().cmd_ok()?;
-                Ok(())
-            })
+        if member.user.read().id != serenity::CACHE.read().user.id {
+            let set_roles_on_join =
+                self.0.config.get(None, ConfigKeys::AllowSetRolesOnJoin)? &&
+                self.0.config.get(Some(guild_id), ConfigKeys::SetRolesOnJoin)?;
+            if set_roles_on_join {
+                let roles = self.clone();
+                let user_id = member.user.read().id;
+                self.0.tasks.dispatch_task(move |_| {
+                    roles.update_user_with_cooldown(
+                        guild_id, user_id, 0, false, false
+                    ).discord_to_cmd().cmd_ok()?;
+                    Ok(())
+                })
+            }
         }
         Ok(())
     }

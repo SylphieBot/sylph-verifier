@@ -220,8 +220,10 @@ config_keys! {
 
     AllowSetRolesOnJoin<bool>(true);
     SetRolesOnJoin<bool>(false);
+
     AllowEnableAutoUpdate<bool>(true);
     EnableAutoUpdate<bool>(false);
+    EnableAutoUpdateUnverified<bool>(false);
 
     MinimumUpdateCooldownSeconds<u64>(60 * 60);
     UpdateCooldownSeconds<u64>(60 * 60);

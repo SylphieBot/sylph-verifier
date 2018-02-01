@@ -167,6 +167,7 @@ config_values! {
         SetRolesOnJoin, true, |x| show_if(x, ConfigKeys::AllowSetRolesOnJoin),
         "Whether to set a user's roles on server join based on an existing verification.",
         parse_bool, print_display);
+
     allow_auto_update_roles<bool>(
         AllowEnableAutoUpdate, false, |_| Ok(GuildShowType::OnlyInTerminal),
         "Whether servers can be configured to periodically update a user's roles when they talk.",
@@ -174,6 +175,11 @@ config_values! {
     auto_update_roles<bool>(
         EnableAutoUpdate, true, |x| show_if(x, ConfigKeys::AllowEnableAutoUpdate),
         "Whether to periodically update a user's roles when they talk.",
+        parse_bool, print_display);
+    auto_update_unverified_roles<bool>(
+        EnableAutoUpdateUnverified, true, |x| show_if(x, ConfigKeys::AllowEnableAutoUpdate),
+        "Whether the bot will auto-update the roles of users who aren't verified \
+         (i.e. remove them).",
         parse_bool, print_display);
 
     minimum_update_cooldown<u64>(

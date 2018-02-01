@@ -280,9 +280,7 @@ impl Verifier {
             let cooldown = self.0.config.get(None, ConfigKeys::VerificationCooldownSeconds)?;
             let cooldown_ends = last_attempt + Duration::from_secs(cooldown);
             if attempt_count >= max_attempts && SystemTime::now() < cooldown_ends {
-                return Ok(VerifyResult::TooManyAttempts {
-                    max_attempts, cooldown, cooldown_ends
-                })
+                return Ok(VerifyResult::TooManyAttempts { max_attempts, cooldown, cooldown_ends })
             }
             attempt_count + 1
         } else {
