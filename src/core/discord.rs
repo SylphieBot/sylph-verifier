@@ -21,6 +21,7 @@ use util;
 use util::MultiMutex;
 
 // TODO: Batch delete operations.
+// TODO: Toss potentially long operations into the thread pool.
 
 struct DiscordContext<'a> {
     ctx: Context, message: &'a Message, content: &'a str, prefix: String,
@@ -201,7 +202,7 @@ impl EventHandler for Handler {
                   ready.user.id, permissions.bits());
         }
 
-        self.shared.tasks.dispatch_task(||
+        error_report::catch_error(||
             self.shared.verify_channel.check_verification_channels_ready(&ready)
         ).ok();
     }
@@ -218,7 +219,7 @@ impl EventHandler for Handler {
         let user_id = serenity::CACHE.read().user.id;
 
         if let Some(guild_id) = guild_id {
-            self.shared.tasks.dispatch_task(|| {
+            error_report::catch_error(|| {
                 self.shared.roles.check_roles_update_msg(guild_id, message.author.id)?;
                 if message.author.id != user_id {
                     self.shared.verify_channel.check_verification_channel_msg(guild_id, &message)?;
@@ -257,13 +258,13 @@ impl EventHandler for Handler {
     }
 
     fn guild_member_addition(&self, _: Context, guild_id: GuildId, member: Member) {
-        self.shared.tasks.dispatch_task(||
+        error_report::catch_error(||
             self.shared.roles.check_roles_update_join(guild_id, member)
-        )
+        ).ok();
     }
 
     fn guild_create(&self, _: Context, guild: Guild, _: bool) {
-        self.shared.tasks.dispatch_task(||
+        error_report::catch_error(||
             self.shared.verify_channel.check_guild_create(guild.id)
         ).ok();
     }
