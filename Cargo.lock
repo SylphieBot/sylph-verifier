@@ -535,13 +535,14 @@ dependencies = [
 
 [[package]]
 name = "linefeed"
-version = "0.3.0"
-source = "git+https://github.com/Lymia/linefeed.git?branch=concurrent-loggers#12c80d530e6981de3c98d614b1538cc134d6a733"
+version = "0.4.0"
+source = "git+https://github.com/Lymia/linefeed.git?branch=concurrent-loggers#5f4b14bd6b7c95ec28616863c78a9e44c051d10e"
 dependencies = [
  "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.36 (registry+https://github.com/rust-lang/crates.io-index)",
  "nix 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ole32-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parking_lot 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "shell32-sys 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "unicode-normalization 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "unicode-width 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1229,7 +1230,7 @@ dependencies = [
  "hyper 0.10.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.36 (registry+https://github.com/rust-lang/crates.io-index)",
- "linefeed 0.3.0 (git+https://github.com/Lymia/linefeed.git?branch=concurrent-loggers)",
+ "linefeed 0.4.0 (git+https://github.com/Lymia/linefeed.git?branch=concurrent-loggers)",
  "log 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "lz4-sys 1.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "num_cpus 1.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1601,7 +1602,7 @@ dependencies = [
 "checksum libsqlite3-sys 0.9.1 (registry+https://github.com/rust-lang/crates.io-index)" = "0e9eb7b8e152b6a01be6a4a2917248381875758250dc3df5d46caf9250341dda"
 "checksum libssh2-sys 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)" = "0db4ec23611747ef772db1c4d650f8bd762f07b461727ec998f953c614024b75"
 "checksum libz-sys 1.0.18 (registry+https://github.com/rust-lang/crates.io-index)" = "87f737ad6cc6fd6eefe3d9dc5412f1573865bded441300904d2f42269e140f16"
-"checksum linefeed 0.3.0 (git+https://github.com/Lymia/linefeed.git?branch=concurrent-loggers)" = "<none>"
+"checksum linefeed 0.4.0 (git+https://github.com/Lymia/linefeed.git?branch=concurrent-loggers)" = "<none>"
 "checksum linked-hash-map 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "7860ec297f7008ff7a1e3382d7f7e1dcd69efc94751a2284bafc3d013c2aa939"
 "checksum log 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)" = "e19e8d5c34a3e0e2223db8e060f9e8264aeeb5c5fc64a4ee9965c062211c024b"
 "checksum log 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "89f010e843f2b1a31dbd316b3b8d443758bc634bed37aabade59c686d644e0a2"

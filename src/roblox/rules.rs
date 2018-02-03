@@ -6,6 +6,8 @@ use std::str::from_utf8;
 
 const DEFAULT_RULE_DEFS: &[(&str, &str)] = &[
     ("Verified", "true"),
+    ("Banned", "is_banned()"),
+    ("NotBanned", "not is_banned()"),
     ("FormerBC", "builtin_rule(NotBC) and badge(Welcome To The Club)"),
     ("NotBC", "not builtin_rule(BC) and not builtin_rule(TBC) and not builtin_rule(OBC)"),
     ("BC", "badge(Builders Club)"),
@@ -167,6 +169,7 @@ enum RuleOp {
     CheckOwnsAsset(u64),
     CheckInGroup(u64, Option<Condition>),
     CheckDevTrustLevel(Condition),
+    CheckIsBanned,
 }
 impl RuleOp {
     pub fn stack_change(&self) -> isize {
@@ -183,6 +186,7 @@ impl RuleOp {
             RuleOp::CheckOwnsAsset(_)          =>  1,
             RuleOp::CheckInGroup(_, _)         =>  1,
             RuleOp::CheckDevTrustLevel(_)      =>  1,
+            RuleOp::CheckIsBanned              =>  1,
         }
     }
 }
@@ -221,6 +225,10 @@ fn parse_term(start: &str, body: &str) -> Result<RuleOp> {
             } else {
                 cmd_error!("Too many parameters in group({})", body)
             }
+        }
+        "is_banned" => {
+            ensure!(body == "", "is_banned takes no parameters.");
+            Ok(RuleOp::CheckIsBanned)
         }
         _ => cmd_error!("Unknown term {}({})", start, body),
     }
@@ -387,16 +395,19 @@ fn option_cache<T, F>(opt: &mut Option<T>, f: F) -> Result<&T> where F: FnOnce()
 
 struct VerificationCountContext {
     username: bool, dev_trust_level: bool, badges: bool, groups: bool,
-    player_badges: HashSet<u64>, owns_asset: HashSet<u64>,
+    profile_exists: bool, player_badges: HashSet<u64>, owns_asset: HashSet<u64>,
 }
 impl VerificationCountContext {
     fn new() -> VerificationCountContext {
         VerificationCountContext {
             username: false, dev_trust_level: false, badges: false, groups: false,
-            player_badges: HashSet::new(), owns_asset: HashSet::new(),
+            profile_exists: false, player_badges: HashSet::new(), owns_asset: HashSet::new(),
         }
     }
 
+    fn uses_is_banned(&mut self) {
+        self.profile_exists = true;
+    }
     fn uses_username(&mut self) {
         self.username = true;
     }
@@ -431,7 +442,7 @@ impl VerificationCountContext {
 
 struct VerificationContext {
     user_id: RobloxUserID,
-    username: Option<String>, dev_trust_level: Option<Option<u32>>,
+    username: Option<String>, is_banned: Option<bool>, dev_trust_level: Option<Option<u32>>,
     badges: Option<HashSet<String>>, groups: Option<HashMap<u64, u32>>,
     player_badges: HashMap<u64, bool>, owns_asset: HashMap<u64, bool>,
 }
@@ -439,13 +450,17 @@ impl VerificationContext {
     fn new(user_id: RobloxUserID) -> VerificationContext {
         VerificationContext {
             user_id,
-            username: None, dev_trust_level: None, badges: None, groups: None,
+            username: None, dev_trust_level: None, is_banned: None, badges: None, groups: None,
             player_badges: HashMap::new(), owns_asset: HashMap::new(),
         }
     }
 
     fn raw_username(id: RobloxUserID, username: &mut Option<String>) -> Result<&str> {
         option_cache(username, || id.lookup_username()).map(|x| x.as_ref())
+    }
+    fn is_banned(&mut self) -> Result<bool> {
+        let id = self.user_id;
+        option_cache(&mut self.is_banned, || api::web_profile_exists(id)).map(|x| *x)
     }
     fn dev_trust_level(&mut self) -> Result<Option<u32>> {
         let id = self.user_id;
@@ -667,6 +682,7 @@ impl VerificationSet {
                 RuleOp::CheckOwnsAsset(asset) => ctx.uses_owns_asset(asset),
                 RuleOp::CheckInGroup(_, _) => ctx.uses_groups(),
                 RuleOp::CheckDevTrustLevel(_) => ctx.uses_dev_trust_level(),
+                RuleOp::CheckIsBanned => ctx.uses_is_banned(),
                 _ => { }
             }
         }
@@ -726,6 +742,8 @@ impl VerificationSet {
                         Some(level) => check.satisifies(level),
                         None => false,
                     }),
+                RuleOp::CheckIsBanned =>
+                    state.push(ctx.is_banned()?),
             }
             ip += 1;
         }

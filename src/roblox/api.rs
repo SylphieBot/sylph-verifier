@@ -1,6 +1,7 @@
 use errors::*;
 use percent_encoding::{percent_encode, QUERY_ENCODE_SET};
 use reqwest;
+use reqwest::StatusCode;
 use roblox::*;
 use serde_json;
 use std::collections::{HashSet, HashMap};
@@ -35,6 +36,17 @@ struct RobloxBadgesLookup {
 struct RobloxGroupLookup {
     #[serde(rename = "Id")] id: u64,
     #[serde(rename = "Rank")] rank: u32,
+}
+
+pub fn web_profile_exists(id: RobloxUserID) -> Result<bool> {
+    let uri = format!("https://www.roblox.com/users/{}/profile", id.0);
+    let response = reqwest::get(&uri)?;
+    let response = if response.status() != StatusCode::NotFound {
+        response.error_for_status()?
+    } else {
+        response
+    };
+    Ok(response.url().as_str() == "https://www.roblox.com/request-error?code=404")
 }
 
 pub fn for_username(name: &str) -> Result<Option<RobloxUserID>> {
