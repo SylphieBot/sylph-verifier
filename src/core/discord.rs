@@ -219,13 +219,14 @@ impl EventHandler for Handler {
         let user_id = serenity::CACHE.read().user.id;
 
         if let Some(guild_id) = guild_id {
-            error_report::catch_error(|| {
-                self.shared.roles.check_roles_update_msg(guild_id, message.author.id)?;
+            let message = message.clone();
+            self.shared.tasks.dispatch_task(move |core| {
+                core.roles().check_roles_update_msg(guild_id, message.author.id)?;
                 if message.author.id != user_id {
-                    self.shared.verify_channel.check_verification_channel_msg(guild_id, &message)?;
+                    core.verify_channel().check_verification_channel_msg(guild_id, &message)?;
                 }
                 Ok(())
-            }).ok();
+            });
         }
 
         // Process commands.
@@ -258,9 +259,9 @@ impl EventHandler for Handler {
     }
 
     fn guild_member_addition(&self, _: Context, guild_id: GuildId, member: Member) {
-        error_report::catch_error(||
-            self.shared.roles.check_roles_update_join(guild_id, member)
-        ).ok();
+        self.shared.tasks.dispatch_task(move |core|
+            core.roles().check_roles_update_join(guild_id, member)
+        );
     }
 
     fn guild_create(&self, _: Context, guild: Guild, _: bool) {
