@@ -259,8 +259,7 @@ macro_rules! migration {
     }
 }
 static MIGRATIONS: &'static [Migration] = &[
-    migration!(0, 1, "version_0_to_1.sql"),
-    migration!(1, 2, "version_1_to_2.sql"),
+    migration!(0, 2, "version_0_to_2.sql"),
 ];
 const CURRENT_VERSION: u32 = 2;
 const FUTURE_VERSION_ERR: &str = "This database was created for a future version of this bot. \
@@ -302,20 +301,6 @@ impl Database {
                      INSERT INTO sylph_verifier_meta (key, value) VALUES ('meta_version', 1);\
                      INSERT INTO sylph_verifier_meta (key, value) VALUES ('schema_version', 0);"
                 )?;
-
-                // TODO: Backup old database.
-                // TODO: Temporary code to migrate dev versions currently in production.
-                let old_migrations_exist = conn.query(
-                    "SELECT COUNT(*) FROM sqlite_master \
-                     WHERE type='table' AND name='sylph_verifier_migrations';", (),
-                ).get::<u32>()? != 0;
-                if old_migrations_exist {
-                    debug!("Migrating from legacy migration tracking.");
-                    conn.execute_batch(
-                        "DROP TABLE sylph_verifier_migrations;\
-                         UPDATE sylph_verifier_meta SET value = 1 WHERE key = 'schema_version';"
-                    )?;
-                }
             }
 
             Ok(())

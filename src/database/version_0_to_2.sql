@@ -11,8 +11,7 @@ BEGIN EXCLUSIVE;
   -- Stores the keys used in the Roblox place file to verify users.
   CREATE TABLE verification_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-    key BLOB NOT NULL, time_increment INT NOT NULL CHECK (time_increment > 0),
-    version INT NOT NULL, change_reason INT NOT NULL, last_updated TIMESTAMP NOT NULL
+    key BLOB NOT NULL, time_increment INT NOT NULL, version INT NOT NULL
   );
 
   -- Stores cooldown for verification.
