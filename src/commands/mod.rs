@@ -257,11 +257,29 @@ impl <'a> CommandContext<'a> {
     }
 
     fn catch_error<F, T>(&self, f: F) -> Result<T> where F: FnOnce() -> Result<T> {
-        match error_report::catch_error(|| match f().discord_to_cmd() {
+        match error_report::catch_error(|| match f() {
             Ok(v) => Ok(Ok(v)),
-            Err(Error(box (ErrorKind::CommandError(err), _))) => {
+            Err(Error::CommandError(err)) => {
                 self.respond(&err)?;
-                Ok(Err(ErrorKind::CommandError(err).into()))
+                Ok(Err(Error::CommandError(err)))
+            }
+            Err(Error::SerenityPermissionError(backtrace)) => {
+                self.respond(
+                    "The bot has encountered an unknown permissions error. Please check that:\n\
+                     • It has the permissions it requires: Manage Roles, Manage Nicknames, \
+                       Read Messages, Send Messages, Manage Messages, Read Message History\n\
+                     • There is no per-channel permissions overwrites preventing it from using \
+                       those permissions on this channel.\n\
+                     • It has a role with a greater rank than all roles it needs to manage."
+                )?;
+                Ok(Err(Error::SerenityPermissionError(backtrace)))
+            }
+            Err(Error::SerenityNotFoundError(backtrace)) => {
+                self.respond(
+                    "A user, message, role or channel the bot is configured to use has \
+                     been deleted."
+                )?;
+                Ok(Err(Error::SerenityNotFoundError(backtrace)))
             }
             Err(e) => {
                 self.respond("The command encountered an unexpected error. \
@@ -271,6 +289,12 @@ impl <'a> CommandContext<'a> {
             }
         }) {
             Ok(Ok(v)) => Ok(v),
+            Err(Error::Panicked) => {
+                self.respond("The command encountered an unexpected error. \
+                              Please contact the bot owner.")?;
+                error!("Command encountered an unexpected error!");
+                Err(Error::Panicked)
+            }
             Err(e) | Ok(Err(e)) => Err(e),
         }
     }
@@ -278,7 +302,7 @@ impl <'a> CommandContext<'a> {
     pub fn get_guild(&self) -> Result<Option<GuildId>> {
         match self.data.discord_context() {
             Some((_, message)) =>
-                match message.channel().chain_err(|| "Failed to get channel.")? {
+                match message.channel()? {
                     Channel::Guild(ch) => Ok(Some(ch.read().guild_id)),
                     Channel::Group(_) | Channel::Private(_) | Channel::Category(_) => Ok(None),
                 },
@@ -288,7 +312,7 @@ impl <'a> CommandContext<'a> {
     pub fn user_guild_permissions(&self) -> Result<Permissions> {
         match self.data.discord_context() {
             Some((_, message)) =>
-                match message.channel().chain_err(|| "Failed to get channel.")? {
+                match message.channel()? {
                     Channel::Guild(ch) =>
                         Ok(ch.read().permissions_for(&message.author)?),
                     Channel::Group(_) | Channel::Private(_) | Channel::Category(_) =>

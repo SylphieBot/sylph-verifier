@@ -60,7 +60,7 @@ impl <'a> CommandContextData for DiscordContext<'a> {
         )?;
         if self.is_verification_channel {
             self.tasks.dispatch_delayed_task(Duration::from_secs(self.delete_in as u64), move |_| {
-                message.delete().map_err(Error::from).discord_to_cmd().cmd_ok()
+                message.delete().map_err(Error::from).drop_nonfatal()
             })
         }
         Ok(())
@@ -106,7 +106,7 @@ impl Handler {
     ) -> Result<(PrivilegeLevel, CommandTarget)> {
         Ok(match *channel {
             Channel::Guild(ref channel) => {
-                let guild = channel.read().guild().chain_err(|| "Guild not found.")?;
+                let guild = channel.read().guild()?;
                 let guild = guild.read();
                 let privilege =
                     if Some(user_id) == bot_owner_id {
@@ -304,7 +304,7 @@ impl DiscordBot {
             error_report::catch_error(|| {
                 match client.start_autosharded() {
                     Ok(_) | Err(SerenityError::Client(ClientError::Shutdown)) => Ok(()),
-                    Err(err) => bail!(err),
+                    Err(err) => Err(err.into()),
                 }
             }).ok();
         })?;

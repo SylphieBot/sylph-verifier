@@ -49,14 +49,7 @@ fn get_root_path() -> PathBuf {
 }
 
 pub fn start() {
-    // Get RUST_BACKTRACE=1 cached by error_chain.
-    let original = env::var_os("RUST_BACKTRACE");
-    env::set_var("RUST_BACKTRACE", "1");
-    Error::from_kind(ErrorKind::Panicked);
-    match original {
-        Some(x) => env::set_var("RUST_BACKTRACE", x),
-        None => env::remove_var("RUST_BACKTRACE"),
-    }
+    env::set_var("RUST_FAILURE_BACKTRACE", "1");
 
     // Find paths
     let root_path = get_root_path();

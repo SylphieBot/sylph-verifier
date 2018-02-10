@@ -142,7 +142,7 @@ impl TokenContext {
         }
     }
     fn new_in_db(conn: &DatabaseConnection, time_increment: u32) -> Result<TokenContext> {
-        let mut rng = OsRng::new().chain_err(|| "OsRng creation failed")?;
+        let mut rng = OsRng::new()?;
         let mut key = Vec::new();
         for _ in 0..16 {
             let r = rng.next_u32();
@@ -156,7 +156,7 @@ impl TokenContext {
             "INSERT INTO verification_keys (key, time_increment, version) VALUES (?1, ?2, ?3)",
             (key, time_increment, TOKEN_VERSION)
         )?;
-        Ok(TokenContext::from_db_internal(conn)?.chain_err(|| "Could not get newly created key!")?)
+        Ok(TokenContext::from_db_internal(conn)??)
     }
     fn rekey(conn: &DatabaseConnection, time_increment: u32) -> Result<TokenContext> {
         info!("Regenerating token key due to user request.");

@@ -22,7 +22,7 @@ byteorder = "1.1"
 chrono = "0.4"
 constant_time_eq = "0.1"
 enumset = { version = "0.3", features = ["nightly"] }
-error-chain = { version = "0.11", git = "https://github.com/Lymia/error-chain.git", branch = "optimize-for-size" }
+failure = { version = "1.0", git = "https://github.com/withoutboats/failure.git", features = ["backtrace"] }
 fs2 = "0.4"
 hmac = "0.5"
 hyper = "0.10"

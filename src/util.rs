@@ -190,12 +190,12 @@ fn can_access(from: RolePosition, to: RolePosition) -> bool {
     }
 }
 fn member_position(member: &Member) -> Result<RolePosition> {
-    let owner_id = member.guild_id.find().chain_err(|| "Could not get guild.")?;
+    let owner_id = member.guild_id.find()?;
     let owner_id = owner_id.read().owner_id;
     if member.user.read().id == owner_id {
         Ok(RolePosition::GuildOwner)
     } else {
-        let roles = member.roles().chain_err(|| "Could not get roles.")?;
+        let roles = member.roles()?;
         if roles.is_empty() {
             Ok(RolePosition::Nobody)
         } else {
@@ -205,7 +205,7 @@ fn member_position(member: &Member) -> Result<RolePosition> {
 }
 pub fn can_member_access_role(member: &Member, role: RoleId) -> Result<bool> {
     let role_position =
-        RolePosition::Role(role.find().chain_err(|| "Could not get role.")?.position);
+        RolePosition::Role(role.find()?.position);
     Ok(can_access(member_position(member)?, role_position))
 }
 pub fn can_member_access_member(from: &Member, to: &Member) -> Result<bool> {
