@@ -33,20 +33,38 @@ lazy_static!(
     };
 );
 
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum RuleResult {
+    True, False, Error,
+}
+
+impl From<bool> for RuleResult {
+    fn from(b: bool) -> Self {
+        if b { RuleResult::True } else { RuleResult::False }
+    }
+}
+impl From<Option<bool>> for RuleResult {
+    fn from(b: Option<bool>) -> Self {
+        b.map_or(RuleResult::Error, |x| x.into())
+    }
+}
+
 #[derive(Debug)]
 enum Token<'a> {
-    Term(&'a str, &'a str), Literal(bool), Not, Or, And, OpenParen, CloseParen,
+    Term(&'a str, &'a str), Literal(RuleResult), Not, Or, And, OpenParen, CloseParen,
 }
 impl <'a> fmt::Display for Token<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Token::Term(start, body) => write!(f, "{}({})", start, body),
-            Token::Literal(b)        => write!(f, "{}", b),
-            Token::Not               => write!(f, "not"),
-            Token::Or                => write!(f, "or"),
-            Token::And               => write!(f, "and"),
-            Token::OpenParen         => write!(f, "("),
-            Token::CloseParen        => write!(f, ")"),
+            Token::Term(start, body)          => write!(f, "{}({})", start, body),
+            Token::Literal(RuleResult::True ) => write!(f, "true"),
+            Token::Literal(RuleResult::False) => write!(f, "false"),
+            Token::Literal(RuleResult::Error) => write!(f, "synthetic_error"),
+            Token::Not                        => write!(f, "not"),
+            Token::Or                         => write!(f, "or"),
+            Token::And                        => write!(f, "and"),
+            Token::OpenParen                  => write!(f, "("),
+            Token::CloseParen                 => write!(f, ")"),
         }
     }
 }
@@ -91,11 +109,12 @@ fn tokenize_rule(rule: &str) -> Result<VecDeque<Token>> {
                     current_pos += 1;
                 }
                 match from_utf8(&rule[token_start..current_pos])? {
-                    "true"  => tokens.push_back(Token::Literal(true)),
-                    "false" => tokens.push_back(Token::Literal(false)),
-                    "not"   => tokens.push_back(Token::Not),
-                    "or"    => tokens.push_back(Token::Or),
-                    "and"   => tokens.push_back(Token::And),
+                    "true"            => tokens.push_back(Token::Literal(RuleResult::True)),
+                    "false"           => tokens.push_back(Token::Literal(RuleResult::False)),
+                    "synthetic_error" => tokens.push_back(Token::Literal(RuleResult::Error)),
+                    "not"             => tokens.push_back(Token::Not),
+                    "or"              => tokens.push_back(Token::Or),
+                    "and"             => tokens.push_back(Token::And),
                     term_start => {
                         current_pos = advance_whitespace(rule, current_pos);
                         cmd_ensure!(expect_char(rule, current_pos, "start of term")? == b'(',
@@ -161,8 +180,8 @@ enum Operator {
 enum RuleOp {
     Read(usize),
     Output(Option<usize>, Option<String>),
-    Literal(bool),
-    StartSkip(bool, bool, usize),
+    Literal(RuleResult),
+    StartSkip(RuleResult, usize),
     Operator(Option<usize>, Operator),
     CheckBadge(String),
     CheckPlayerBadge(u64),
@@ -177,7 +196,7 @@ impl RuleOp {
             RuleOp::Read(_)                    =>  1,
             RuleOp::Output(_, _)               => -1,
             RuleOp::Literal(_)                 =>  1,
-            RuleOp::StartSkip(_, _, _)         =>  0,
+            RuleOp::StartSkip(_, _)            =>  0,
             RuleOp::Operator(_, Operator::And) => -1,
             RuleOp::Operator(_, Operator::Or)  => -1,
             RuleOp::Operator(_, Operator::Not) =>  0,
@@ -247,8 +266,8 @@ impl CompileContext {
     fn push_op(&mut self, op: CompileOperator) {
         self.op_stack.push((op, None))
     }
-    fn push_op_skip(&mut self, skip_cond: bool, skip_result: bool, op: CompileOperator) {
-        self.ops.push(RuleOp::StartSkip(skip_cond, skip_result, self.op_id));
+    fn push_op_skip(&mut self, skip_cond: RuleResult, op: CompileOperator) {
+        self.ops.push(RuleOp::StartSkip(skip_cond, self.op_id));
         self.op_stack.push((op, Some(self.op_id)));
         self.op_id += 1;
     }
@@ -344,12 +363,12 @@ impl VerificationRule {
                     }
                     Token::And => {
                         ctx.pop_op_stack(CompileOperator::And)?;
-                        ctx.push_op_skip(false, false, CompileOperator::And);
+                        ctx.push_op_skip(RuleResult::False, CompileOperator::And);
                         is_operand_context = true;
                     }
                     Token::Or => {
                         ctx.pop_op_stack(CompileOperator::Or)?;
-                        ctx.push_op_skip(true, true, CompileOperator::Or);
+                        ctx.push_op_skip(RuleResult::True, CompileOperator::Or);
                         is_operand_context = true;
                     }
                     tok => cmd_error!("Expected operator, found '{}'.", tok),
@@ -386,11 +405,6 @@ impl fmt::Display for VerificationRule {
         writeln!(f, "}}")?;
         Ok(())
     }
-}
-
-fn option_cache<T, F>(opt: &mut Option<T>, f: F) -> Result<&T> where F: FnOnce() -> Result<T> {
-    if opt.is_none() { *opt = Some(f()?) }
-    if let &mut Some(ref t) = opt { Ok(t) } else { unreachable!() }
 }
 
 struct VerificationCountContext {
@@ -440,62 +454,76 @@ impl VerificationCountContext {
     }
 }
 
+struct ValueCache<T>(Option<Option<T>>);
+impl <T> ValueCache<T> {
+    fn new() -> ValueCache<T> {
+        ValueCache(None)
+    }
+
+    fn get_cached<F, G>(
+        &mut self, f: F, g: G
+    ) -> RuleResult where F: FnOnce() -> Result<T>, G: FnOnce(&T) -> bool {
+        if self.0.is_none() {
+            self.0 = Some(f().ok())
+        }
+        match self.0.as_ref().unwrap().as_ref() {
+            Some(x) => g(x).into(),
+            None => RuleResult::Error,
+        }
+    }
+}
+
 struct VerificationContext {
     user_id: RobloxUserID,
-    username: Option<String>, is_banned: Option<bool>, dev_trust_level: Option<Option<u32>>,
-    badges: Option<HashSet<String>>, groups: Option<HashMap<u64, u32>>,
-    player_badges: HashMap<u64, bool>, owns_asset: HashMap<u64, bool>,
+    is_banned: ValueCache<bool>, dev_trust_level: ValueCache<Option<u32>>,
+    badges: ValueCache<HashSet<String>>, groups: ValueCache<HashMap<u64, u32>>,
+    player_badges: HashMap<u64, RuleResult>, owns_asset: HashMap<u64, RuleResult>,
 }
 impl VerificationContext {
     fn new(user_id: RobloxUserID) -> VerificationContext {
         VerificationContext {
             user_id,
-            username: None, dev_trust_level: None, is_banned: None, badges: None, groups: None,
+            is_banned: ValueCache::new(), dev_trust_level: ValueCache::new(),
+            badges: ValueCache::new(), groups: ValueCache::new(),
             player_badges: HashMap::new(), owns_asset: HashMap::new(),
         }
     }
 
-    fn raw_username(id: RobloxUserID, username: &mut Option<String>) -> Result<&str> {
-        option_cache(username, || id.lookup_username()).map(|x| x.as_ref())
-    }
-    fn is_banned(&mut self) -> Result<bool> {
+    fn is_banned(&mut self) -> RuleResult {
         let id = self.user_id;
-        option_cache(&mut self.is_banned, || api::web_profile_exists(id)).map(|x| *x)
+        self.is_banned.get_cached(|| api::web_profile_exists(id), |x| *x)
     }
-    fn dev_trust_level(&mut self) -> Result<Option<u32>> {
+    fn has_trust_level(&mut self, condition: Condition) -> RuleResult {
         let id = self.user_id;
-        let username = &mut self.username;
-        option_cache(&mut self.dev_trust_level,
-                     || api::get_dev_trust_level(VerificationContext::raw_username(id, username)?))
-            .map(|x| *x)
+        self.dev_trust_level.get_cached(|| api::get_dev_trust_level(&id.lookup_username()?),
+                                        |x| match *x {
+                                            Some(x) => condition.satisifies(x),
+                                            None => false,
+                                        })
     }
-    fn badges(&mut self) -> Result<&HashSet<String>> {
+    fn has_roblox_badge(&mut self, asset_id: &str) -> RuleResult {
         let id = self.user_id;
-        option_cache(&mut self.badges, || api::get_roblox_badges(id))
+        self.badges.get_cached(|| api::get_roblox_badges(id), |x| x.contains(asset_id))
     }
-    fn groups(&mut self) -> Result<&HashMap<u64, u32>> {
+    fn is_in_group(&mut self, group_id: u64, rank: Option<Condition>) -> RuleResult {
         let id = self.user_id;
-        option_cache(&mut self.groups, || api::get_player_groups(id))
+        self.groups.get_cached(|| api::get_player_groups(id),
+                               |x| match rank {
+                                   Some(r) => x.get(&group_id).map_or(false, |y| r.satisifies(*y)),
+                                   None => x.contains_key(&group_id),
+                               })
     }
-    fn has_player_badge(&mut self, badge_id: u64) -> Result<bool> {
-        match self.player_badges.get(&badge_id) {
-            Some(&b) => Ok(b),
-            None => {
-                let result = api::has_player_badge(self.user_id, badge_id)?;
-                self.player_badges.insert(badge_id, result);
-                Ok(result)
-            }
-        }
+    fn has_player_badge(&mut self, badge_id: u64) -> RuleResult {
+        let id = self.user_id;
+        *self.player_badges.entry(badge_id).or_insert_with(||
+            api::has_player_badge(id, badge_id).ok().into()
+        )
     }
-    fn owns_asset(&mut self, asset_id: u64) -> Result<bool> {
-        match self.owns_asset.get(&asset_id) {
-            Some(&b) => Ok(b),
-            None => {
-                let result = api::owns_asset(self.user_id, asset_id)?;
-                self.owns_asset.insert(asset_id, result);
-                Ok(result)
-            }
-        }
+    fn owns_asset(&mut self, asset_id: u64) -> RuleResult {
+        let id = self.user_id;
+        *self.owns_asset.entry(asset_id).or_insert_with(||
+            api::owns_asset(id, asset_id).ok().into()
+        )
     }
 }
 
@@ -565,9 +593,9 @@ impl RuleResolutionContext {
                         match op {
                             RuleOp::Read(i) =>
                                 ops.push(RuleOp::Read(linked[&rule.inputs[i]])),
-                            RuleOp::StartSkip(skip_if, skip_result, id) => {
+                            RuleOp::StartSkip(skip_cond, id) => {
                                 ensure!(id < rule.op_id_count, "Internal error: Invalid skip ID.");
-                                ops.push(RuleOp::StartSkip(skip_if, skip_result, skip_base + id))
+                                ops.push(RuleOp::StartSkip(skip_cond, skip_base + id))
                             }
                             RuleOp::Operator(Some(id), op) => {
                                 ensure!(id < rule.op_id_count, "Internal error: Invalid skip ID.");
@@ -609,19 +637,22 @@ impl RuleResolutionContext {
     }
 }
 
-struct State(Vec<bool>, usize);
+struct State(Vec<RuleResult>, usize);
 impl State {
-    fn get_var(&mut self, var: usize) -> bool {
+    fn get_var(&mut self, var: usize) -> RuleResult {
         self.0[var]
     }
-    fn set_var(&mut self, var: usize, val: bool) {
+    fn set_var(&mut self, var: usize, val: RuleResult) {
         self.0[var] = val;
     }
-    fn pop(&mut self) -> bool {
+    fn peek(&self) -> RuleResult {
+        self.0[self.1 - 1]
+    }
+    fn pop(&mut self) -> RuleResult {
         self.1 -= 1;
         self.0[self.1]
     }
-    fn push(&mut self, value: bool) {
+    fn push(&mut self, value: RuleResult) {
         self.0[self.1] = value;
         self.1 += 1;
     }
@@ -689,8 +720,8 @@ impl VerificationSet {
         ctx.count()
     }
 
-    pub fn verify(&self, id: RobloxUserID) -> Result<HashMap<&str, bool>> {
-        let mut state = State(vec![false; self.mem_size], self.stack_base);
+    pub fn verify(&self, id: RobloxUserID) -> Result<HashMap<&str, RuleResult>> {
+        let mut state = State(vec![RuleResult::Error; self.mem_size], self.stack_base);
         let mut ctx = VerificationContext::new(id);
         let mut outputs = HashMap::new();
         let mut ip = 0;
@@ -710,40 +741,36 @@ impl VerificationSet {
                     }
                 },
                 RuleOp::Literal(b) => state.push(b),
-                RuleOp::StartSkip(skip_if, skip_result, skip_id) => {
-                    let current = state.pop();
-                    if current == skip_if {
+                RuleOp::StartSkip(skip_cond, skip_id) => {
+                    let current = state.peek();
+                    if current == RuleResult::Error || current == skip_cond {
                         ip = self.skips[skip_id];
-                        state.push(skip_result);
-                    } else {
-                        state.push(current);
                     }
                 },
                 RuleOp::Operator(_, op) => {
                     let val = match op {
-                        Operator::Not => !state.pop(),
-                        Operator::And => state.pop() & state.pop(),
-                        Operator::Or  => state.pop() | state.pop(),
+                        Operator::Not => match state.pop() {
+                            RuleResult::True => RuleResult::False,
+                            RuleResult::False => RuleResult::True,
+                            RuleResult::Error => RuleResult::Error,
+                        },
+                        Operator::And => match (state.pop(), state.pop()) {
+                            (RuleResult::True, x) => x,
+                            (x, _) => x,
+                        },
+                        Operator::Or  => match (state.pop(), state.pop()) {
+                            (RuleResult::False, x) => x,
+                            (x, _) => x,
+                        },
                     };
                     state.push(val)
                 }
-                RuleOp::CheckBadge(ref name) => state.push(ctx.badges()?.contains(name)),
-                RuleOp::CheckPlayerBadge(id) => state.push(ctx.has_player_badge(id)?),
-                RuleOp::CheckOwnsAsset(asset) => state.push(ctx.owns_asset(asset)?),
-                RuleOp::CheckInGroup(group, None) =>
-                    state.push(ctx.groups()?.contains_key(&group)),
-                RuleOp::CheckInGroup(group, Some(check)) =>
-                    state.push(match ctx.groups()?.get(&group) {
-                        Some(&level) => check.satisifies(level),
-                        None => false,
-                    }),
-                RuleOp::CheckDevTrustLevel(check) =>
-                    state.push(match ctx.dev_trust_level()? {
-                        Some(level) => check.satisifies(level),
-                        None => false,
-                    }),
-                RuleOp::CheckIsBanned =>
-                    state.push(ctx.is_banned()?),
+                RuleOp::CheckBadge(ref name) => state.push(ctx.has_roblox_badge(name)),
+                RuleOp::CheckPlayerBadge(id) => state.push(ctx.has_player_badge(id)),
+                RuleOp::CheckOwnsAsset(asset) => state.push(ctx.owns_asset(asset)),
+                RuleOp::CheckInGroup(group, rank) => state.push(ctx.is_in_group(group, rank)),
+                RuleOp::CheckDevTrustLevel(check) => state.push(ctx.has_trust_level(check)),
+                RuleOp::CheckIsBanned => state.push(ctx.is_banned()),
             }
             ip += 1;
         }

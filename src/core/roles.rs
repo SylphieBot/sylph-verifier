@@ -12,11 +12,13 @@ use std::collections::{HashMap, HashSet};
 use std::mem::drop;
 use std::sync::Arc;
 use std::time::{SystemTime, Duration};
-use roblox::{VerificationSet, VerificationRule, RobloxUserID};
+use roblox::{VerificationSet, VerificationRule, RuleResult, RobloxUserID};
 use util;
 use util::ConcurrentCache;
 
 // TODO: Prevent assigning the same role id to two rules.
+// TODO: Allow unlinking of roles assigned to deleted rules.
+// TODO: Add a error check for looking up username (handle same way as a role error?).
 
 enum VerificationRulesStatus {
     NotCompiled,
@@ -36,10 +38,12 @@ pub struct ConfiguredRole {
     pub role_id: Option<RoleId>, pub custom_rule: Option<String>, pub last_updated: SystemTime,
 }
 pub struct AssignedRole {
-    pub rule: String, pub role_id: RoleId, pub is_assigned: bool,
+    pub rule: String, pub role_id: RoleId, pub is_assigned: RuleResult,
 }
+
 pub enum SetRolesStatus {
-    Success, IsAdmin, NotSet,
+    Success { nickname_admin_error: bool, determine_roles_error: bool },
+    NotVerified,
 }
 
 struct RoleManagerData {
@@ -351,13 +355,14 @@ impl RoleManager {
 
         let orig_roles: HashSet<RoleId> = member.roles.iter().map(|x| *x).collect();
         let mut roles = orig_roles.clone();
+        let mut determine_roles_error = false;
         if let Some(roblox_id) = roblox_id {
             let assigned_roles = self.get_assigned_roles(guild, roblox_id)?;
             for role in assigned_roles {
-                if role.is_assigned {
-                    roles.insert(role.role_id);
-                } else {
-                    roles.remove(&role.role_id);
+                match role.is_assigned {
+                    RuleResult::True  => { roles.insert(role.role_id); }
+                    RuleResult::False => { roles.remove(&role.role_id); }
+                    RuleResult::Error => { determine_roles_error = true; }
                 }
             }
         } else {
@@ -388,10 +393,9 @@ impl RoleManager {
                 edit
             })?;
         }
-        Ok(if !can_access_user && do_set_nickname {
-            SetRolesStatus::IsAdmin
-        } else {
-            SetRolesStatus::Success
+
+        Ok(SetRolesStatus::Success {
+            nickname_admin_error: !can_access_user && do_set_nickname, determine_roles_error,
         })
     }
 
@@ -406,7 +410,7 @@ impl RoleManager {
             } else {
                 let member = guild.member(discord_id)?;
                 trace!("User {} is not verified. Not changing roles.", member.distinct());
-                Ok(SetRolesStatus::NotSet)
+                Ok(SetRolesStatus::NotVerified)
             }
         }
     }

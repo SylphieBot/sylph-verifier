@@ -1,7 +1,7 @@
 #![warn(unused_extern_crates)]
 #![recursion_limit="128"]
-#![feature(nll, box_patterns, never_type, integer_atomics, optin_builtin_traits, fnbox,
-           const_fn, const_atomic_bool_new, const_atomic_usize_new, conservative_impl_trait)]
+#![feature(nll, box_patterns, never_type, integer_atomics, fnbox,
+           const_fn, conservative_impl_trait)]
 #![deny(unused_must_use)]
 
 // TODO: Clean up general program structure

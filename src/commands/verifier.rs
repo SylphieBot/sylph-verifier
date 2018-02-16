@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use roblox::*;
 use serenity;
+use std::borrow::Cow;
 use std::cmp::max;
 use std::time::SystemTime;
 use util;
@@ -24,6 +25,29 @@ fn get_discord_username(discord_id: UserId) -> String {
             Ok(x) => x.tag(),
             Err(_) => format!("(discord uid #{})", discord_id.0),
         }
+    }
+}
+fn verify_status_str(prefix: &str, result: SetRolesStatus) -> Cow<'static, str> {
+    match result {
+        SetRolesStatus::Success { nickname_admin_error, determine_roles_error } => {
+            if determine_roles_error {
+                format!(
+                    "An error occurred while looking up your Roblox account, and some of your \
+                     roles may not have been set. Please wait a while then use the '{}update' \
+                     command.", prefix,
+                ).into()
+            } else {
+                format!(
+                    "Your roles have been updated.{}",
+                    if nickname_admin_error {
+                        " Your nickname was not set as this bot does not have the permissions \
+                          needed to edit it."
+                    } else { "" }
+                ).into()
+            }
+        }
+        SetRolesStatus::NotVerified =>
+            "Your roles were not updated as you are not verified.".into(),
     }
 }
 fn reverify_help(
@@ -54,16 +78,8 @@ fn do_verify(ctx: &CommandContext, _: &Context, msg: &Message) -> Result<()> {
         VerifyResult::VerificationOk => {
             info!("{} successfully verified as {}",
                   discord_username, roblox_username);
-            match ctx.core.roles().assign_roles(guild_id, msg.author.id, Some(roblox_id))? {
-                SetRolesStatus::Success =>
-                    ctx.respond("Your roles have been set.")?,
-                SetRolesStatus::IsAdmin =>
-                    ctx.respond("Your roles have been set. Note that your nickname has not been \
-                                 set as this bot does not have permission to edit it.")?,
-                SetRolesStatus::NotSet  =>
-                    // This case shouldn't actually happen.
-                    ctx.respond("Your roles were not set. Please contact a server administrator.")?,
-            }
+            let status = ctx.core.roles().assign_roles(guild_id, msg.author.id, Some(roblox_id))?;
+            ctx.respond(verify_status_str(ctx.prefix(), status))?;
             Ok(())
         }
         VerifyResult::TokenAlreadyUsed => {
@@ -312,10 +328,18 @@ pub const COMMANDS: &[Command] = &[
 
             let mut roles = String::new();
             for role in ctx.core.roles().get_assigned_roles(guild_id, roblox_id)? {
-                writeln!(roles, "• {} {} **{}**",
+                writeln!(roles, "• {}{} {} **{}**",
+                         if role.is_assigned == RuleResult::Error {
+                             "An error occurred while determining if "
+                         } else {
+                             ""
+                         },
                          roblox_username,
-                         if role.is_assigned { "matches the rule" }
-                             else { "does not match the rule" },
+                         match role.is_assigned {
+                             RuleResult::True => "matches the rule",
+                             RuleResult::False => "does not match the rule",
+                             RuleResult::Error => "matches the rule",
+                         },
                          role.rule)?
             }
             if roles.is_empty() {
@@ -337,10 +361,10 @@ pub const COMMANDS: &[Command] = &[
                 ctx.core.config().get(None, ConfigKeys::MinimumUpdateCooldownSeconds)?,
                 ctx.core.config().get(Some(guild_id), ConfigKeys::UpdateCooldownSeconds)?,
             );
-            ctx.core.roles().update_user_with_cooldown(
+            let status = ctx.core.roles().update_user_with_cooldown(
                 guild_id, msg.author.id, cooldown, true, false,
             )?;
-            ctx.respond("Your roles have been updated.")?;
+            ctx.respond(verify_status_str(ctx.prefix(), status))?;
             Ok(())
         }),
     Command::new("whois")

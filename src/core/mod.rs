@@ -136,7 +136,7 @@ impl VerifierCore {
             info!("All threads stopped. Shutting down.")
         }
     }
-    pub fn start(&self) -> Result<()> {
+    pub fn start(self) -> Result<()> {
         ensure!(self.0.status.compare_and_swap(STATUS_STOPPED, STATUS_RUNNING,
                                                Ordering::Relaxed) == STATUS_STOPPED,
                 "VerifierCore already started.");
@@ -186,7 +186,3 @@ impl VerifierCore {
         self.0.place.update_place(self)
     }
 }
-
-// This allows start() to safely take &self rather than self. This enforces a logical constraint,
-// not a memory safety constraint.
-impl !Sync for VerifierCore { }
