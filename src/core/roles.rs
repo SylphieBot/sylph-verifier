@@ -8,7 +8,7 @@ use serenity;
 use serenity::model::prelude::*;
 use std::borrow::Cow;
 use std::cmp::max;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::mem::drop;
 use std::sync::Arc;
 use std::time::{SystemTime, Duration};
@@ -42,7 +42,7 @@ pub struct AssignedRole {
 }
 
 pub enum SetRolesStatus {
-    Success { nickname_admin_error: bool, determine_roles_error: bool },
+    Success { nickname_admin_error: bool, determine_roles_error: bool, set_roles_error: bool },
     NotVerified,
 }
 
@@ -333,69 +333,58 @@ impl RoleManager {
     pub fn assign_roles(
         &self, guild: GuildId, discord_id: UserId, roblox_id: Option<RobloxUserID>
     ) -> Result<SetRolesStatus> {
-        let member = guild.member(discord_id)?;
+        let mut member = guild.member(discord_id)?;
         let me_member = guild.member(serenity::CACHE.read().user.id)?;
         let can_access_user = util::can_member_access_member(&me_member, &member)?;
-        let do_set_nickname = self.0.config.get(None, ConfigKeys::SetNickname)?;
 
-        let set_nickname = if can_access_user && do_set_nickname {
+        let do_set_nickname = self.0.config.get(None, ConfigKeys::SetNickname)?;
+        if can_access_user && do_set_nickname {
             let target_nickname = if let Some(roblox_id) = roblox_id {
                 Some(format!("{}\u{17B5}", roblox_id.lookup_username()?))
             } else {
                 None
             };
             if target_nickname != member.nick {
-                Some(target_nickname.unwrap_or_else(|| "".to_string()))
-            } else {
-                None
+                trace!("Assigning nickname to {}: {:?}", member.distinct(), target_nickname);
+                member.edit(|x| x.nickname(target_nickname.as_ref().map_or("", |x| x.as_str())))?;
             }
-        } else {
-            None
-        };
+        }
 
-        let orig_roles: HashSet<RoleId> = member.roles.iter().map(|x| *x).collect();
-        let mut roles = orig_roles.clone();
         let mut determine_roles_error = false;
+        let mut set_roles_error = false;
         if let Some(roblox_id) = roblox_id {
             let assigned_roles = self.get_assigned_roles(guild, roblox_id)?;
             for role in assigned_roles {
                 match role.is_assigned {
-                    RuleResult::True  => { roles.insert(role.role_id); }
-                    RuleResult::False => { roles.remove(&role.role_id); }
-                    RuleResult::Error => { determine_roles_error = true; }
+                    RuleResult::True  => if !member.roles.contains(&role.role_id) {
+                        trace!("Adding role to {}: {}", member.distinct(), role.role_id.0);
+                        set_roles_error |= member.add_role(role.role_id).is_err();
+                    },
+                    RuleResult::False => if member.roles.contains(&role.role_id) {
+                        trace!("Removing role from {}: {}", member.distinct(), role.role_id.0);
+                        set_roles_error |= member.remove_role(role.role_id).is_err();
+                    },
+                    RuleResult::Error => {
+                        determine_roles_error = true;
+                    }
                 }
             }
         } else {
             let config = self.get_configuration(guild)?;
             for (_, role) in config {
                 if let Some(id) = role.role_id {
-                    roles.remove(&id);
+                    if member.roles.contains(&id) {
+                        trace!("Removing role from {}: {}", member.distinct(), id.0);
+                        set_roles_error |= member.remove_role(id).is_err();
+                    }
                 }
             }
         }
-        let set_roles: Option<Vec<RoleId>> = if orig_roles != roles {
-            Some(roles.drain().collect())
-        } else {
-            None
-        };
-
-        trace!("Assigning nickname to {}: {:?}", member.distinct(), set_nickname);
-        trace!("Assigning roles to {}: {:?}", member.distinct(), set_roles);
-
-        if set_nickname.is_some() || set_roles.is_some() {
-            member.edit(|mut edit| {
-                if let Some(nickname) = set_nickname {
-                    edit = edit.nickname(&nickname);
-                }
-                if let Some(roles) = set_roles {
-                    edit = edit.roles(&roles)
-                }
-                edit
-            })?;
-        }
 
         Ok(SetRolesStatus::Success {
-            nickname_admin_error: !can_access_user && do_set_nickname, determine_roles_error,
+            nickname_admin_error: !can_access_user && do_set_nickname,
+            determine_roles_error,
+            set_roles_error,
         })
     }
 

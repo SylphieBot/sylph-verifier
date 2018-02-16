@@ -29,12 +29,19 @@ fn get_discord_username(discord_id: UserId) -> String {
 }
 fn verify_status_str(prefix: &str, result: SetRolesStatus) -> Cow<'static, str> {
     match result {
-        SetRolesStatus::Success { nickname_admin_error, determine_roles_error } => {
-            if determine_roles_error {
+        SetRolesStatus::Success {
+            nickname_admin_error, determine_roles_error, set_roles_error,
+        } => {
+            if determine_roles_error || set_roles_error {
                 format!(
-                    "An error occurred while looking up your Roblox account, and some of your \
-                     roles may not have been set. Please wait a while then use the '{}update' \
-                     command.", prefix,
+                    "An error occurred while {}, and some of your roles may not have been set. \
+                     Please wait a while then use the '{}update' command.",
+                    if determine_roles_error {
+                        "looking up your Roblox account"
+                    } else {
+                        "setting your Discord roles"
+                    },
+                    prefix,
                 ).into()
             } else {
                 format!(
