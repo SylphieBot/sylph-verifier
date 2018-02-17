@@ -21,7 +21,6 @@ impl RobloxUserID {
     }
 
     pub fn lookup_username(&self) -> ::errors::Result<String> {
-        use errors::*;
-        self.lookup_username_opt().and_then(|x| x.chain_err(|| "Could not find Roblox user."))
+        Ok(self.lookup_username_opt()??)
     }
 }

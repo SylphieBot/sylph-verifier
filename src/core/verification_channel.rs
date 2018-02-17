@@ -55,7 +55,7 @@ impl VerificationChannelManager {
         &self, guild_id: GuildId, message: &Message
     ) -> Result<()> {
         if self.is_verification_channel(guild_id, message.channel_id)? {
-            message.delete().map_err(Error::from).discord_to_cmd().cmd_ok()?;
+            message.delete().map_err(Error::from).drop_nonfatal()?;
         }
         Ok(())
     }
@@ -84,15 +84,15 @@ impl VerificationChannelManager {
     }
 
     pub fn check_guild_create(&self, guild_id: GuildId) -> Result<()> {
-        self.delete_old_messages(guild_id).discord_to_cmd().cmd_ok()
+        self.delete_old_messages(guild_id).drop_nonfatal()
     }
     pub fn check_verification_channels_ready(&self, ready: &Ready, ) -> Result<()> {
         for guild in &ready.guilds {
             match *guild {
                 GuildStatus::OnlineGuild(ref guild) =>
-                    self.delete_old_messages(guild.id).discord_to_cmd().cmd_ok()?,
+                    self.delete_old_messages(guild.id).drop_nonfatal()?,
                 GuildStatus::OnlinePartialGuild(ref guild) =>
-                    self.delete_old_messages(guild.id).discord_to_cmd().cmd_ok()?,
+                    self.delete_old_messages(guild.id).drop_nonfatal()?,
                 _ => { }
             }
         }
@@ -170,13 +170,13 @@ impl VerificationChannelManager {
             "SELECT discord_guild_id FROM verification_channel_info", (),
         ).get_all::<GuildId>()?;
         for guild_id in guilds {
-            self.update_message_guild(guild_id).discord_to_cmd().cmd_ok()?;
+            self.update_message_guild(guild_id).drop_nonfatal()?;
         }
         Ok(())
     }
     pub fn update(&self, guild_id: Option<GuildId>) -> Result<()> {
         if let Some(guild_id) = guild_id {
-            self.update_message_guild(guild_id).discord_to_cmd().cmd_ok()
+            self.update_message_guild(guild_id).drop_nonfatal()
         } else {
             self.update_all_messages()
         }

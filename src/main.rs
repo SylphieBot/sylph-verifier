@@ -1,7 +1,7 @@
 #![warn(unused_extern_crates)]
 #![recursion_limit="128"]
 #![feature(nll, box_patterns, never_type, integer_atomics, fnbox,
-           const_fn, conservative_impl_trait)]
+           const_fn, conservative_impl_trait, try_trait)]
 #![deny(unused_must_use)]
 
 // TODO: Clean up general program structure
@@ -36,7 +36,7 @@ extern crate uuid;
 #[allow(unused_extern_crates)] extern crate serde;
 
 #[macro_use] extern crate enumset;
-#[macro_use] extern crate error_chain;
+#[macro_use] extern crate failure;
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
 #[macro_use] extern crate serde_derive;
@@ -56,6 +56,8 @@ fn main() {
     println!("Sylph-Verifier v{} by LymeeFairy", env!("CARGO_PKG_VERSION"));
     println!("Licenced under the Apache license, version 2.0");
     println!();
+
+    println!("{}", std::mem::size_of::<errors::Error>());
 
     startup::start();
     std::process::exit(0); // Just in case.

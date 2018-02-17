@@ -1,7 +1,7 @@
 use backtrace::Backtrace;
 use chrono::Utc;
-use error_chain::ChainedError;
 use errors::*;
+use failure::Fail;
 use logger;
 use parking_lot::RwLock;
 use parking_lot::deadlock::check_deadlock;
@@ -150,15 +150,15 @@ fn check_report_deadlock() -> Result<bool> {
 fn thread_name() -> String {
     thread::current().name().or(Some("<unknown>")).unwrap().to_string()
 }
-fn report_err<E: ChainedError>(e: &E) -> Result<()> {
+fn report_err<E: Fail>(e: &E) -> Result<()> {
     let mut cause = String::new();
     writeln!(cause, "Thread {} errored with '{}'", thread_name(), e)?;
-    for e in e.iter().skip(1) {
+    for e in e.causes().skip(1) {
         writeln!(cause, "Caused by: {}", e)?;
     }
 
     let backtrace = match e.backtrace() {
-        Some(bt) => format!("{:?}", bt),
+        Some(bt) => format!("{}", bt),
         None => format!("(from catch site)\n{:?}", Backtrace::new()),
     };
     write_report(ReportType::Error, &cause, &backtrace)?;
@@ -195,7 +195,7 @@ pub fn init<P: AsRef<Path>>(root_path: P) {
                 Err(e) => {
                     logger::lock_log_sender();
                     println!();
-                    report_err(&e.chain_err(|| "Error writing deadlock report!")).ok();
+                    report_err(&e).ok();
                     abort();
                 }
             }
@@ -210,6 +210,6 @@ pub fn catch_error<F, T>(f: F) -> Result<T> where F: FnOnce() -> Result<T> {
             report_err(&e)?;
             Err(e)
         }
-        Err(_) => bail!(ErrorKind::Panicked),
+        Err(_) => Err(Error::Panicked),
     }
 }

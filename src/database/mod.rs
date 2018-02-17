@@ -23,7 +23,7 @@ impl <T : FromSql> RusqliteFromSql for FromSqlWrapper<T> {
     fn column_result(value: ValueRef) -> FromSqlResult<Self> {
         T::from_sql(value)
             .map(FromSqlWrapper)
-            .map_err(|x| FromSqlError::Other(Box::new(x.to_sync_error())))
+            .map_err(|x| FromSqlError::Other(Box::new(x.compat())))
     }
 }
 pub trait FromSqlRow : Sized {
@@ -37,7 +37,7 @@ struct ToSqlWrapper<'a, T: 'a>(&'a T);
 impl <'a, T : ToSql + 'a> RusqliteToSql for ToSqlWrapper<'a, T> {
     fn to_sql(&self) -> RusqliteResult<ToSqlOutput> {
         self.0.to_sql().map_err(|x|
-            RusqliteError::ToSqlConversionFailure(Box::new(x.to_sync_error())))
+            RusqliteError::ToSqlConversionFailure(Box::new(x.compat())))
     }
 }
 pub trait ToSqlArgs {
@@ -61,7 +61,11 @@ impl <'a> RowsWrapper<'a> {
         }
     }
     pub fn get<T: FromSqlRow>(&mut self) -> Result<T> {
-        Ok(self.get_opt()?.chain_err(|| "Query returned no rows!")?)
+        let opt = self.get_opt()?;
+        match opt {
+            Some(res) => Ok(res),
+            None => bail!("Query returned no rows!"),
+        }
     }
 }
 
@@ -131,9 +135,9 @@ impl ConnectionManager {
 }
 impl ManageConnection for ConnectionManager {
     type Connection = SqliteConnection;
-    type Error = Error;
+    type Error = RusqliteError;
 
-    fn connect(&self) -> Result<SqliteConnection> {
+    fn connect(&self) -> RusqliteResult<SqliteConnection> {
         let conn = Connection::open_with_flags(&self.db_file,
             OpenFlags::SQLITE_OPEN_READ_WRITE |
             OpenFlags::SQLITE_OPEN_CREATE)?;
@@ -141,8 +145,11 @@ impl ManageConnection for ConnectionManager {
         conn.execute_batch(include_str!("setup_connection.sql"))?;
         Ok(SqliteConnection { conn, is_poisoned: Cell::new(false) })
     }
-    fn is_valid(&self, conn: &mut SqliteConnection) -> Result<()> {
-        ensure!(!conn.is_poisoned.get(), "Connection poisoned.");
+    fn is_valid(&self, conn: &mut SqliteConnection) -> RusqliteResult<()> {
+        if conn.is_poisoned.get() {
+            // Random RuqliteError variant.
+            return Err(RusqliteError::QueryReturnedNoRows)
+        }
         conn.prepare_cached("SELECT 1")?.query_row(&[], |_| ())?;
         Ok(())
     }

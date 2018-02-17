@@ -169,12 +169,10 @@ fn map_string_properties<F>(rblx: &mut RblxData, mut f: F) -> Result<()>
         let mut types = parse_types(rblx)?;
         for entry in &mut rblx.entries {
             if entry.kind == PROP_HEADER {
-                let prop = parse_string_property(entry.data.decompress()?.as_ref())
-                    .chain_err(|| "Failed to parse property in Roblox place file.")?;
+                let prop = parse_string_property(entry.data.decompress()?.as_ref())?;
                 if let Some(prop) = prop {
                     if prop.prop_name == "Name" {
-                        let type_name = types.remove(&prop.type_id)
-                            .chain_err(|| format!("unknown type id: {}", prop.type_id))?;
+                        let type_name = types.remove(&prop.type_id)?;
                         type_names.insert(prop.type_id, (type_name, Some(prop.prop_values)));
                     } else {
                         map_targets.push((prop.type_id, prop.prop_name, prop.prop_values, entry));
@@ -188,8 +186,7 @@ fn map_string_properties<F>(rblx: &mut RblxData, mut f: F) -> Result<()>
     }
     for (type_id, prop_name, mut prop_values, entry_target) in map_targets {
         let mut modified = false;
-        let type_data = type_names.get(&type_id)
-            .chain_err(|| format!("unknown type id: {}", type_id))?;
+        let type_data = type_names.get(&type_id)?;
         if let Some(ref names) = type_data.1 {
             for (value, name) in prop_values.iter_mut().zip(names.iter()) {
                 if let Some(new_value) = f(&type_data.0, name, &prop_name, value)? {
@@ -375,8 +372,7 @@ lazy_static! {
 pub fn create_place_file(overwrite_template: Option<&[u8]>,
                          config: &[LuaConfigEntry]) -> Result<Vec<u8>> {
     let place_file = overwrite_template.unwrap_or(PLACE_TEMPLATE);
-    let mut place = parse_rblx_container(place_file)
-        .chain_err(|| "Failed to parse Roblox place container.")?;
+    let mut place = parse_rblx_container(place_file)?;
     let mut version_found = false;
 
     let mut server_secure_config_source = false;

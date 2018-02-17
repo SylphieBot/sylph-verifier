@@ -183,8 +183,7 @@ impl RoleManager {
 
                 Ok(VerificationRulesStatus::Compiled(set, active_rules))
             }
-            Err(Error(box (ErrorKind::CommandError(err), _))) =>
-                Ok(VerificationRulesStatus::Error(err)),
+            Err(Error::CommandError(err)) => Ok(VerificationRulesStatus::Error(err)),
             Err(err) => Err(err),
         }
     }
@@ -478,8 +477,7 @@ impl RoleManager {
                 self.0.tasks.dispatch_task(move |_| {
                     roles.update_user_with_cooldown(
                         guild_id, user_id, auto_update_cooldown, false, update_unverified,
-                    ).discord_to_cmd().cmd_ok()?;
-                    Ok(())
+                    ).drop_nonfatal()
                 })
             }
         }
@@ -496,8 +494,7 @@ impl RoleManager {
                 self.0.tasks.dispatch_task(move |_| {
                     roles.update_user_with_cooldown(
                         guild_id, user_id, 0, false, false
-                    ).discord_to_cmd().cmd_ok()?;
-                    Ok(())
+                    ).drop_nonfatal()
                 })
             }
         }
