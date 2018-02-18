@@ -210,6 +210,6 @@ pub fn catch_error<F, T>(f: F) -> Result<T> where F: FnOnce() -> Result<T> {
             report_err(&e)?;
             Err(e)
         }
-        Err(_) => Err(Error::Panicked),
+        Err(_) => Err(ErrorKind::Panicked.into()),
     }
 }

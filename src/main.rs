@@ -57,8 +57,6 @@ fn main() {
     println!("Licenced under the Apache license, version 2.0");
     println!();
 
-    println!("{}", std::mem::size_of::<errors::Error>());
-
     startup::start();
     std::process::exit(0); // Just in case.
 }

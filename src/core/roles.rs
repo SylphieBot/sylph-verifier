@@ -183,8 +183,9 @@ impl RoleManager {
 
                 Ok(VerificationRulesStatus::Compiled(set, active_rules))
             }
-            Err(Error::CommandError(err)) => Ok(VerificationRulesStatus::Error(err)),
-            Err(err) => Err(err),
+            Err(match_err!(ErrorKind::CommandError(err))) =>
+                Ok(VerificationRulesStatus::Error(err)),
+            Err(e) => Err(e),
         }
     }
 

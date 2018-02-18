@@ -58,7 +58,7 @@ pub const COMMANDS: &[Command] = &[
                 "test_error" => bail!("Error triggered by command."),
                 "test_panic" => panic!("Panic triggered by command."),
                 "test_deadlock" => {
-                    cmd_ensure!(ctx.command_target != CommandTarget::Terminal,
+                    cmd_ensure!(ctx.command_target == CommandTarget::Terminal,
                                 "This command *will* crash the bot and can only be called from \
                                  terminal.");
                     let mutex_a1 = Arc::new(Mutex::new(()));

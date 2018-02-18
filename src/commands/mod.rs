@@ -259,11 +259,11 @@ impl <'a> CommandContext<'a> {
     fn catch_error<F, T>(&self, f: F) -> Result<T> where F: FnOnce() -> Result<T> {
         match error_report::catch_error(|| match f() {
             Ok(v) => Ok(Ok(v)),
-            Err(Error::CommandError(err)) => {
+            Err(match_err!(ErrorKind::CommandError(err))) => {
                 self.respond(&err)?;
-                Ok(Err(Error::CommandError(err)))
+                Ok(Err(ErrorKind::CommandError(err).into()))
             }
-            Err(Error::SerenityPermissionError(backtrace)) => {
+            Err(e @ match_err!(ErrorKind::SerenityPermissionError)) => {
                 self.respond(
                     "The bot has encountered an unknown permissions error. Please check that:\n\
                      • It has the permissions it requires: Manage Roles, Manage Nicknames, \
@@ -272,14 +272,14 @@ impl <'a> CommandContext<'a> {
                        those permissions on this channel.\n\
                      • It has a role with a greater rank than all roles it needs to manage."
                 )?;
-                Ok(Err(Error::SerenityPermissionError(backtrace)))
+                Ok(Err(e))
             }
-            Err(Error::SerenityNotFoundError(backtrace)) => {
+            Err(e @ match_err!(ErrorKind::SerenityNotFoundError)) => {
                 self.respond(
                     "A user, message, role or channel the bot is configured to use has \
                      been deleted."
                 )?;
-                Ok(Err(Error::SerenityNotFoundError(backtrace)))
+                Ok(Err(e))
             }
             Err(e) => {
                 self.respond("The command encountered an unexpected error. \
@@ -289,11 +289,11 @@ impl <'a> CommandContext<'a> {
             }
         }) {
             Ok(Ok(v)) => Ok(v),
-            Err(Error::Panicked) => {
+            Err(e @ match_err!(ErrorKind::Panicked)) => {
                 self.respond("The command encountered an unexpected error. \
                               Please contact the bot owner.")?;
                 error!("Command encountered an unexpected error!");
-                Err(Error::Panicked)
+                Err(e)
             }
             Err(e) | Ok(Err(e)) => Err(e),
         }

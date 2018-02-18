@@ -25,41 +25,72 @@ impl fmt::Display for StdErrorWrapper {
 }
 
 #[derive(Fail, Debug, Display)]
-pub enum Error {
+pub enum ErrorKind {
     #[display(fmt = "{}", _0)]
-    StringError(Cow<'static, str>, Backtrace),
+    StringError(Cow<'static, str>),
     #[display(fmt = "{}", _0)]
-    StdError(StdErrorWrapper, Backtrace),
+    StdError(StdErrorWrapper),
     #[display(fmt = "{}", _0)]
     CommandError(Cow<'static, str>),
     #[display(fmt = "None found when Some expected.")]
-    SomeExpected(Backtrace),
+    SomeExpected,
     #[display(fmt = "Sylph-Verifier encountered a panic.")]
     Panicked,
 
     #[display(fmt = "Serenity has encountered an permissions error.")]
-    SerenityPermissionError(Backtrace),
+    SerenityPermissionError,
     #[display(fmt = "Discord snowflake ID does not exist.")]
-    SerenityNotFoundError(Backtrace),
+    SerenityNotFoundError,
     #[display(fmt = "Serenity encountered an non-successful status code: {:?}", _0)]
-    SerenityHttpError(StatusCode, Backtrace),
+    SerenityHttpError(StatusCode),
 }
+
+pub struct Error(pub Box<(ErrorKind, Option<Backtrace>)>);
+impl Fail for Error {
+    fn cause(&self) -> Option<&Fail> {
+        (*self.0).0.cause()
+    }
+
+    fn backtrace(&self) -> Option<&Backtrace> {
+        (*self.0).1.as_ref()
+    }
+}
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(&(*self.0).0, f)
+    }
+}
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&(*self.0).0, f)
+    }
+}
+impl From<ErrorKind> for Error {
+    fn from(err: ErrorKind) -> Self {
+        let backtrace = match err {
+            ErrorKind::CommandError(_) | ErrorKind::Panicked => None,
+            _ => Some(Backtrace::new()),
+        };
+        Error(Box::new((err, backtrace)))
+    }
+}
+
 pub type Result<T> = ::std::result::Result<T, Error>;
 
-macro_rules! from_err {
-    ($($t:ty),* $(,)*) => {$(
-        impl From<$t> for ::errors::Error {
-            fn from(err: $t) -> Self {
-                ::errors::Error::StdError(::errors::StdErrorWrapper(
-                                              ::parking_lot::Mutex::new(Box::new(err))
-                                          ),
-                                          ::failure::Backtrace::new())
-            }
-        }
-    )*}
-}
 mod impls {
     use *;
+    use errors::*;
+    use parking_lot::Mutex;
+
+    macro_rules! from_err {
+        ($($t:ty),* $(,)*) => {$(
+            impl From<$t> for Error {
+                fn from(err: $t) -> Self {
+                    ErrorKind::StdError(StdErrorWrapper(Mutex::new(Box::new(err)))).into()
+                }
+            }
+        )*}
+    }
     from_err! {
         std::fmt::Error, std::io::Error, std::num::ParseIntError, std::str::Utf8Error,
         std::string::FromUtf8Error, std::time::SystemTimeError, r2d2::Error, reqwest::Error,
@@ -72,31 +103,32 @@ impl From<SerenityError> for Error {
         match err {
             SerenityError::Model(ModelError::Hierarchy) |
             SerenityError::Model(ModelError::InvalidPermissions(_)) =>
-                Error::SerenityPermissionError(Backtrace::new()),
+                ErrorKind::SerenityPermissionError,
             SerenityError::Http(HttpError::UnsuccessfulRequest(ref res)) => match res.status {
-                StatusCode::NotFound => Error::SerenityNotFoundError(Backtrace::new()),
-                StatusCode::Forbidden => Error::SerenityPermissionError(Backtrace::new()),
-                status => Error::SerenityHttpError(status, Backtrace::new()),
+                StatusCode::NotFound => ErrorKind::SerenityNotFoundError,
+                StatusCode::Forbidden => ErrorKind::SerenityPermissionError,
+                status => ErrorKind::SerenityHttpError(status),
             }
-            err => Error::StdError(StdErrorWrapper(Mutex::new(Box::new(err))),
-                                   Backtrace::new()),
-        }
+            err => ErrorKind::StdError(StdErrorWrapper(Mutex::new(Box::new(err)))),
+        }.into()
     }
 }
 impl From<NoneError> for Error {
     fn from(_: NoneError) -> Self {
-        Error::SomeExpected(Backtrace::new())
+        ErrorKind::SomeExpected.into()
     }
+}
+
+macro_rules! match_err {
+    ($pat:pat) => { Error(box ($pat, _)) }
 }
 
 macro_rules! bail {
     ($err:expr $(,)*) => {
-        return Err(::errors::Error::StringError($err.into(),
-                                                ::failure::Backtrace::new()))
+        return Err(::errors::ErrorKind::StringError($err.into()).into())
     };
     ($err:expr, $($arg:expr),* $(,)*) => {
-        return Err(::errors::Error::StringError(format!($err, $($arg,)*).into(),
-                                                ::failure::Backtrace::new()))
+        return Err(::errors::ErrorKind::StringError(format!($err, $($arg,)*).into()).into())
     };
 }
 macro_rules! ensure {
@@ -114,10 +146,10 @@ macro_rules! ensure {
 
 macro_rules! cmd_error {
     ($err:expr $(,)*) => {
-        return Err(::errors::Error::CommandError($err.into()))
+        return Err(::errors::ErrorKind::CommandError($err.into()).into())
     };
     ($err:expr, $($arg:expr),* $(,)*) => {
-        return Err(::errors::Error::CommandError(format!($err, $($arg,)*).into()))
+        return Err(::errors::ErrorKind::CommandError(format!($err, $($arg,)*).into()).into())
     };
 }
 macro_rules! cmd_ensure {
@@ -138,10 +170,10 @@ impl <T> ResultCmdExt<T> for Result<T> {
     fn drop_nonfatal(self) -> Result<()> {
         match self {
             Ok(_) => Ok(()),
-            Err(Error::CommandError(_)) => Ok(()),
-            Err(Error::SerenityNotFoundError(_)) => Ok(()),
-            Err(Error::SerenityPermissionError(_)) => Ok(()),
-            Err(e) => Err(e),
+            Err(match_err!(ErrorKind::CommandError(_))) => Ok(()),
+            Err(match_err!(ErrorKind::SerenityNotFoundError)) => Ok(()),
+            Err(match_err!(ErrorKind::SerenityPermissionError)) => Ok(()),
+            Err(e) => Err(e)
         }
     }
     fn status_to_cmd<F, R: Into<Cow<'static, str>>>(
@@ -149,9 +181,9 @@ impl <T> ResultCmdExt<T> for Result<T> {
     ) -> Result<T> where F: FnOnce() -> R {
         match self {
             Ok(v) => Ok(v),
-            Err(Error::SerenityHttpError(err_code, _)) if code == err_code =>
-                Err(Error::CommandError(f().into())),
-            Err(e) => Err(e),
+            Err(match_err!(ErrorKind::SerenityHttpError(err_code))) if code == err_code =>
+                Err(ErrorKind::CommandError(f().into()).into()),
+            Err(e) => Err(e)
         }
     }
 }
@@ -161,14 +193,14 @@ pub trait IntoResultCmdExt<T> {
 }
 impl <T, E> IntoResultCmdExt<T> for StdResult<T, E> {
     fn to_cmd_err<F, R: Into<Cow<'static, str>>>(self, f: F) -> Result<T> where F: FnOnce() -> R {
-        self.map_err(|_| Error::CommandError(f().into()))
+        self.map_err(|_| ErrorKind::CommandError(f().into()).into())
     }
 }
 impl <T> IntoResultCmdExt<T> for Option<T> {
     fn to_cmd_err<F, R: Into<Cow<'static, str>>>(self, f: F) -> Result<T> where F: FnOnce() -> R {
         match self {
             Some(t) => Ok(t),
-            None => Err(Error::CommandError(f().into())),
+            None => Err(ErrorKind::CommandError(f().into()).into()),
         }
     }
 }
