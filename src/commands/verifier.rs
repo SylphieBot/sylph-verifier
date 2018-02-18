@@ -290,16 +290,15 @@ pub const COMMANDS: &[Command] = &[
             let rule_name = ctx.arg(0)?;
             let role_name = ctx.rest(1)?.trim();
             let guild_id = msg.guild_id()?;
-            let me_member = guild_id.member(serenity::CACHE.read().user.id)?;
-            let sender_member = guild_id.member(msg.author.id)?;
+            let my_id = serenity::CACHE.read().user.id;
             if !role_name.is_empty() {
                 let role_id = find_role(guild_id, role_name)?;
                 if ctx.privilege_level < PrivilegeLevel::BotOwner {
-                    if !util::can_member_access_role(&sender_member, role_id)? {
+                    if !util::can_member_access_role(guild_id, msg.author.id, role_id)? {
                         cmd_error!("You do not have permission to modify that role.")
                     }
                 }
-                if !util::can_member_access_role(&me_member, role_id)? {
+                if !util::can_member_access_role(guild_id, my_id, role_id)? {
                     cmd_error!("This bot does not have permission to modify that role.")
                 }
                 ctx.core.roles().set_active_role(guild_id, rule_name, Some(role_id))?;

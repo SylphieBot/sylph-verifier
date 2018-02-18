@@ -334,8 +334,8 @@ impl RoleManager {
         &self, guild: GuildId, discord_id: UserId, roblox_id: Option<RobloxUserID>
     ) -> Result<SetRolesStatus> {
         let mut member = guild.member(discord_id)?;
-        let me_member = guild.member(serenity::CACHE.read().user.id)?;
-        let can_access_user = util::can_member_access_member(&me_member, &member)?;
+        let my_id = serenity::CACHE.read().user.id;
+        let can_access_user = util::can_member_access_member(guild, my_id, discord_id)?;
 
         let do_set_nickname = self.0.config.get(None, ConfigKeys::SetNickname)?;
         if can_access_user && do_set_nickname {

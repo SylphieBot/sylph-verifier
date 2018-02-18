@@ -177,37 +177,21 @@ pub fn sprunge(text: &str) -> Result<String> {
     Ok(result.text()?.trim().to_string())
 }
 
-// TODO: Wait for Serenity's heirarchy functions to account for owners/etc.
-#[derive(Ord, PartialOrd, Eq, PartialEq)]
-enum RolePosition {
-    Nobody, Role(i64), GuildOwner,
-}
-fn can_access(from: RolePosition, to: RolePosition) -> bool {
-    if from == RolePosition::GuildOwner {
-        true
+// Hierarchy access helpers
+pub fn can_member_access_role(guild_id: GuildId, member_id: UserId, role: RoleId) -> Result<bool> {
+    let guild = guild_id.find()?;
+    let owner_id = guild.read().owner_id;
+
+    if member_id == owner_id {
+        Ok(true)
     } else {
-        from > to
-    }
-}
-fn member_position(member: &Member) -> Result<RolePosition> {
-    let owner_id = member.guild_id.find()?;
-    let owner_id = owner_id.read().owner_id;
-    if member.user.read().id == owner_id {
-        Ok(RolePosition::GuildOwner)
-    } else {
-        let roles = member.roles()?;
-        if roles.is_empty() {
-            Ok(RolePosition::Nobody)
-        } else {
-            Ok(RolePosition::Role(roles.iter().map(|x| x.position).max().unwrap()))
+        match guild.read().member(member_id)?.highest_role_info() {
+            Some((_, position)) => Ok(role.find()?.position < position),
+            None => Ok(false),
         }
     }
 }
-pub fn can_member_access_role(member: &Member, role: RoleId) -> Result<bool> {
-    let role_position =
-        RolePosition::Role(role.find()?.position);
-    Ok(can_access(member_position(member)?, role_position))
-}
-pub fn can_member_access_member(from: &Member, to: &Member) -> Result<bool> {
-    Ok(can_access(member_position(from)?, member_position(to)?))
+pub fn can_member_access_member(guild_id: GuildId, from: UserId, to: UserId) -> Result<bool> {
+    let guild = guild_id.find()?;
+    Ok(from == to || guild.read().greater_member_hierarchy(from, to) == Some(from))
 }
