@@ -12,7 +12,7 @@ use std::result::{Result as StdResult};
 pub use failure::{Fail, ResultExt};
 pub use hyper::status::StatusCode;
 
-pub struct StdErrorWrapper(Mutex<Box<StdError + Send + 'static>>);
+pub struct StdErrorWrapper(Mutex<Box<dyn StdError + Send + 'static>>);
 impl fmt::Debug for StdErrorWrapper {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Debug::fmt(&*self.0.lock(), f)
@@ -47,7 +47,7 @@ pub enum ErrorKind {
 
 pub struct Error(pub Box<(ErrorKind, Option<Backtrace>)>);
 impl Fail for Error {
-    fn cause(&self) -> Option<&Fail> {
+    fn cause(&self) -> Option<&dyn Fail> {
         (*self.0).0.cause()
     }
 
@@ -162,9 +162,9 @@ macro_rules! cmd_ensure {
 
 pub trait ResultCmdExt<T> {
     fn drop_nonfatal(self) -> Result<()>;
-    fn status_to_cmd<F, R: Into<Cow<'static, str>>>(
-        self, code: StatusCode, f: F
-    ) -> Result<T> where F: FnOnce() -> R;
+    fn status_to_cmd<R: Into<Cow<'static, str>>>(
+        self, code: StatusCode, f: impl FnOnce() -> R
+    ) -> Result<T>;
 }
 impl <T> ResultCmdExt<T> for Result<T> {
     fn drop_nonfatal(self) -> Result<()> {
@@ -176,9 +176,9 @@ impl <T> ResultCmdExt<T> for Result<T> {
             Err(e) => Err(e)
         }
     }
-    fn status_to_cmd<F, R: Into<Cow<'static, str>>>(
-        self, code: StatusCode, f: F
-    ) -> Result<T> where F: FnOnce() -> R {
+    fn status_to_cmd<R: Into<Cow<'static, str>>>(
+        self, code: StatusCode, f: impl FnOnce() -> R
+    ) -> Result<T> {
         match self {
             Ok(v) => Ok(v),
             Err(match_err!(ErrorKind::SerenityHttpError(err_code))) if code == err_code =>
@@ -189,15 +189,15 @@ impl <T> ResultCmdExt<T> for Result<T> {
 }
 
 pub trait IntoResultCmdExt<T> {
-    fn to_cmd_err<F, R: Into<Cow<'static, str>>>(self, f: F) -> Result<T> where F: FnOnce() -> R;
+    fn to_cmd_err<R: Into<Cow<'static, str>>>(self, f: impl FnOnce() -> R) -> Result<T>;
 }
 impl <T, E> IntoResultCmdExt<T> for StdResult<T, E> {
-    fn to_cmd_err<F, R: Into<Cow<'static, str>>>(self, f: F) -> Result<T> where F: FnOnce() -> R {
+    fn to_cmd_err<R: Into<Cow<'static, str>>>(self, f: impl FnOnce() -> R) -> Result<T> {
         self.map_err(|_| ErrorKind::CommandError(f().into()).into())
     }
 }
 impl <T> IntoResultCmdExt<T> for Option<T> {
-    fn to_cmd_err<F, R: Into<Cow<'static, str>>>(self, f: F) -> Result<T> where F: FnOnce() -> R {
+    fn to_cmd_err<R: Into<Cow<'static, str>>>(self, f: impl FnOnce() -> R) -> Result<T> {
         match self {
             Some(t) => Ok(t),
             None => Err(ErrorKind::CommandError(f().into()).into()),

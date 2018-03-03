@@ -67,7 +67,7 @@ fn make_error_report(kind: ReportType, cause: &str, backtrace: &str) -> Result<S
     Ok(buf)
 }
 
-fn write_report_file<P: AsRef<Path>>(root_path: P, kind: &str, report: &str) -> Result<PathBuf> {
+fn write_report_file(root_path: impl AsRef<Path>, kind: &str, report: &str) -> Result<PathBuf> {
     let mut path = PathBuf::from(root_path.as_ref());
     path.push("logs");
     fs::create_dir_all(&path)?;
@@ -150,7 +150,7 @@ fn check_report_deadlock() -> Result<bool> {
 fn thread_name() -> String {
     thread::current().name().or(Some("<unknown>")).unwrap().to_string()
 }
-fn report_err<E: Fail>(e: &E) -> Result<()> {
+fn report_err(e: &impl Fail) -> Result<()> {
     let mut cause = String::new();
     writeln!(cause, "Thread {} errored with '{}'", thread_name(), e)?;
     for e in e.causes().skip(1) {
@@ -164,7 +164,7 @@ fn report_err<E: Fail>(e: &E) -> Result<()> {
     write_report(ReportType::Error, &cause, &backtrace)?;
     Ok(())
 }
-fn cause_from_panic(info: &(Any + Send), loc: Option<&Location>) -> String {
+fn cause_from_panic(info: &(dyn Any + Send), loc: Option<&Location>) -> String {
     let raw_cause: Cow<'static, str> = if let Some(&s) = info.downcast_ref::<&str>() {
         format!("'{}'", s).into()
     } else if let Some(s) = info.downcast_ref::<String>() {
@@ -177,7 +177,7 @@ fn cause_from_panic(info: &(Any + Send), loc: Option<&Location>) -> String {
     });
     format!("Thread '{}' panicked with {}{}", thread_name(), raw_cause, raw_location)
 }
-pub fn init<P: AsRef<Path>>(root_path: P) {
+pub fn init(root_path: impl AsRef<Path>) {
     *ROOT_PATH.write() = Some(root_path.as_ref().to_owned());
 
     set_hook(Box::new(|panic_info| {
@@ -203,7 +203,7 @@ pub fn init<P: AsRef<Path>>(root_path: P) {
     }).expect("failed to start deadlock detection thread");
 }
 
-pub fn catch_error<F, T>(f: F) -> Result<T> where F: FnOnce() -> Result<T> {
+pub fn catch_error<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(Ok(t)) => Ok(t),
         Ok(Err(e)) => {

@@ -41,7 +41,7 @@ impl <'a, T : ToSql + 'a> RusqliteToSql for ToSqlWrapper<'a, T> {
     }
 }
 pub trait ToSqlArgs {
-    fn to_sql_args<R, F>(&self, f: F) -> Result<R> where F: FnOnce(&[&RusqliteToSql]) -> Result<R>;
+    fn to_sql_args<R>(&self, f: impl FnOnce(&[&dyn RusqliteToSql]) -> Result<R>) -> Result<R>;
 }
 
 struct RowsWrapper<'a>(Rows<'a>);
@@ -73,7 +73,7 @@ pub struct QueryDSL<'a, 'b, T> {
     conn: &'a DatabaseConnection, sql: &'b str, cache: bool, args: T,
 }
 impl <'a, 'b, T: ToSqlArgs> QueryDSL<'a, 'b, T> {
-    fn do_op<F, R>(&self, f: F) -> Result<R> where F: FnOnce(RowsWrapper) -> Result<R> {
+    fn do_op<R>(&self, f: impl FnOnce(RowsWrapper) -> Result<R>) -> Result<R> {
         self.args.to_sql_args(|args| if self.cache {
             let mut stat = self.conn.conn.prepare(self.sql)?;
             let row = RowsWrapper(stat.query(args)?);
@@ -186,9 +186,9 @@ impl DatabaseConnection {
     }
 
     // TODO: Track the current type of the Transaction, IMMEDIATE in IMMEDIATE is OK, for example.
-    fn transaction_raw<T, F>(
-        &self, f: F, behavior: TransactionBehavior
-    ) -> Result<T> where F: FnOnce() -> Result<T> {
+    fn transaction_raw<T>(
+        &self, f: impl FnOnce() -> Result<T>, behavior: TransactionBehavior
+    ) -> Result<T> {
         let cur_depth = self.transaction_depth.get();
         if cur_depth == 0 {
             let sql = match behavior {
@@ -227,13 +227,13 @@ impl DatabaseConnection {
         }
     }
 
-    pub fn transaction<T, F>(&self, f: F) -> Result<T> where F: FnOnce() -> Result<T> {
+    pub fn transaction<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
         self.transaction_raw(f, TransactionBehavior::Deferred)
     }
-    pub fn transaction_immediate<T, F>(&self, f: F) -> Result<T> where F: FnOnce() -> Result<T> {
+    pub fn transaction_immediate<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
         self.transaction_raw(f, TransactionBehavior::Immediate)
     }
-    pub fn transaction_exclusive<T, F>(&self, f: F) -> Result<T> where F: FnOnce() -> Result<T> {
+    pub fn transaction_exclusive<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
         self.transaction_raw(f, TransactionBehavior::Exclusive)
     }
 
@@ -242,7 +242,7 @@ impl DatabaseConnection {
         Ok(())
     }
 
-    pub fn execute<T : ToSqlArgs>(&self, sql: &str, args: T) -> Result<isize> {
+    pub fn execute(&self, sql: &str, args: impl ToSqlArgs) -> Result<isize> {
         Ok(args.to_sql_args(|args| Ok(self.conn.prepare_cached(sql)?.execute(args)?))? as isize)
     }
     pub fn query<'a, 'b, T : ToSqlArgs>(
@@ -277,7 +277,7 @@ pub struct Database {
     pool: Arc<Pool<ConnectionManager>>,
 }
 impl Database {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Database> {
+    pub fn new(path: impl AsRef<Path>) -> Result<Database> {
         let pool = Arc::new(Pool::builder()
             .max_size(15)
             .idle_timeout(Some(time::Duration::from_secs(60 * 5)))

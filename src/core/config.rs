@@ -40,8 +40,8 @@ fn get_db<T: FromSql>(
             ).get_opt()?
     })
 }
-fn set_db<T: ToSql>(
-    conn: &DatabaseConnection, guild: Option<GuildId>, key: &str, value: &T,
+fn set_db(
+    conn: &DatabaseConnection, guild: Option<GuildId>, key: &str, value: &impl ToSql,
 ) -> Result<()> {
     match guild {
         Some(guild) => {

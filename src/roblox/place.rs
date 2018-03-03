@@ -66,7 +66,7 @@ fn read_cursor_slice_to_end(cursor: Cursor<&[u8]>) -> &[u8] {
     &cursor.into_inner()[start..]
 }
 
-fn check_unknown_field<R: Read>(r: &mut R) -> Result<()> {
+fn check_unknown_field(mut r: impl Read) -> Result<()> {
     ensure!(r.read_u32::<LE>()? == 0, "unknown field has unexpected value");
     Ok(())
 }
@@ -147,7 +147,7 @@ fn parse_string_property(data: &[u8]) -> Result<Option<RblxStringProperties>> {
         Ok(None)
     }
 }
-fn write_string_property<W: Write>(w: &mut W, props: &RblxStringProperties) -> Result<()> {
+fn write_string_property(mut w: impl Write, props: &RblxStringProperties) -> Result<()> {
     w.write_u32::<LE>(props.type_id)?;
     w.write_u32::<LE>(props.prop_name.len() as u32)?;
     w.write_all(props.prop_name.as_bytes())?;
@@ -160,8 +160,9 @@ fn write_string_property<W: Write>(w: &mut W, props: &RblxStringProperties) -> R
 
     Ok(())
 }
-fn map_string_properties<F>(rblx: &mut RblxData, mut f: F) -> Result<()>
-    where F: FnMut(&str, &str, &str, &str) -> Result<Option<String>> {
+fn map_string_properties(
+    rblx: &mut RblxData, mut f: impl FnMut(&str, &str, &str, &str) -> Result<Option<String>>
+) -> Result<()> {
 
     let mut type_names = HashMap::new();
     let mut map_targets = Vec::new();
@@ -204,7 +205,7 @@ fn map_string_properties<F>(rblx: &mut RblxData, mut f: F) -> Result<()>
     }
     Ok(())
 }
-fn write_rblx_container<W: Write>(w: &mut W, rblx: &RblxData) -> Result<()> {
+fn write_rblx_container(mut w: impl Write, rblx: &RblxData) -> Result<()> {
     w.write_all(RBLX_HEADER)?;
 
     w.write_u32::<LE>(rblx.type_count)?;
@@ -328,7 +329,7 @@ pub struct LuaConfigEntry<'a> {
     name: &'static str, is_secret: bool, value: LuaConfigValue<'a>,
 }
 impl <'a> LuaConfigEntry<'a> {
-    pub fn new<T : Into<LuaConfigValue<'a>>>(name: &'static str, is_secret: bool, v: T) -> Self {
+    pub fn new(name: &'static str, is_secret: bool, v: impl Into<LuaConfigValue<'a>>) -> Self {
         LuaConfigEntry {
             name, is_secret, value: v.into(),
         }

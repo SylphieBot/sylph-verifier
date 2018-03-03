@@ -217,7 +217,7 @@ pub fn format_recent_logs() -> Result<String> {
     ERROR_LOG_BUF.lock().format_logs()
 }
 
-pub fn init<P: AsRef<Path>>(root_path: P) -> Result<()> {
+pub fn init(root_path: impl AsRef<Path>) -> Result<()> {
     let mut log_dir = PathBuf::from(root_path.as_ref());
     log_dir.push("logs");
     fs::create_dir_all(&log_dir)?;

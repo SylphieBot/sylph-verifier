@@ -34,10 +34,10 @@ fn parse_u32(s: &str) -> Result<u32> {
 fn parse_u64(s: &str) -> Result<u64> {
     parse_as(s, "Setting must be a non-negative number.")
 }
-fn print_display<T : Display>(_: &VerifierCore, t: T) -> Result<String> {
+fn print_display(_: &VerifierCore, t: impl Display) -> Result<String> {
     Ok(format!("{}", t))
 }
-fn print_quoted<T : Display>(_: &VerifierCore, t: T) -> Result<String> {
+fn print_quoted(_: &VerifierCore, t: impl Display) -> Result<String> {
     Ok(format!("\"{}\"", t))
 }
 fn print_bounded_time(core: &VerifierCore, secs: u64, bound: ConfigKey<u64>) -> Result<String> {

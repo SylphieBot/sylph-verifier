@@ -155,7 +155,7 @@ impl Command {
         Command { command_fn: Some(CommandFn::Discord(f)), ..self }
     }
 
-    pub fn run(&self, ctx: &CommandContextData, core: &VerifierCore) {
+    pub fn run(&self, ctx: &dyn CommandContextData, core: &VerifierCore) {
         let args = Args::new(ctx.message_content());
 
         let ctx = CommandContext::new(core, ctx, args, self);
@@ -234,11 +234,11 @@ struct CommandContext<'a> {
     pub privilege_level: PrivilegeLevel,
     pub command_target: CommandTarget,
     command: &'a Command,
-    data: &'a CommandContextData,
+    data: &'a dyn CommandContextData,
     args: Args<'a>,
 }
 impl <'a> CommandContext<'a> {
-    fn new(core: &'a VerifierCore, data: &'a CommandContextData,
+    fn new(core: &'a VerifierCore, data: &'a dyn CommandContextData,
            args: Args<'a>, command: &'a Command) -> CommandContext<'a> {
         CommandContext {
             core, data, args, command,
@@ -249,14 +249,14 @@ impl <'a> CommandContext<'a> {
     pub fn prefix(&self) -> &str {
         self.data.prefix()
     }
-    pub fn respond<S: AsRef<str>>(&self, message: S) -> Result<()> {
+    pub fn respond(&self, message: impl AsRef<str>) -> Result<()> {
         self.data.respond(message.as_ref().trim())
     }
     pub fn discord_context(&self) -> Option<(&Context, &Message)> {
         self.data.discord_context()
     }
 
-    fn catch_error<F, T>(&self, f: F) -> Result<T> where F: FnOnce() -> Result<T> {
+    fn catch_error<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
         match error_report::catch_error(|| match f() {
             Ok(v) => Ok(Ok(v)),
             Err(match_err!(ErrorKind::CommandError(err))) => {

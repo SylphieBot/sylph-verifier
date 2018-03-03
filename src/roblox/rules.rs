@@ -460,9 +460,9 @@ impl <T> ValueCache<T> {
         ValueCache(None)
     }
 
-    fn get_cached<F, G>(
-        &mut self, f: F, g: G
-    ) -> RuleResult where F: FnOnce() -> Result<T>, G: FnOnce(&T) -> bool {
+    fn get_cached(
+        &mut self, f: impl FnOnce() -> Result<T>, g: impl FnOnce(&T) -> bool
+    ) -> RuleResult {
         if self.0.is_none() {
             self.0 = Some(f().ok())
         }
@@ -663,9 +663,10 @@ pub struct VerificationSet {
     ops: Vec<RuleOp>, skips: Vec<usize>, stack_base: usize, mem_size: usize,
 }
 impl VerificationSet {
-    pub fn compile<F>(
-        active_rules: &[&str], mut lookup_custom_rule: F,
-    ) -> Result<VerificationSet> where F: FnMut(&str) -> Result<Option<VerificationRule>> {
+    pub fn compile(
+        active_rules: &[&str],
+        mut lookup_custom_rule: impl FnMut(&str) -> Result<Option<VerificationRule>>,
+    ) -> Result<VerificationSet> {
         let mut resolve_ctx = RuleResolutionContext::new();
 
         for &rule_name in active_rules {

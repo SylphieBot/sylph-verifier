@@ -15,8 +15,8 @@ use threadpool::ThreadPool;
 const MAX_SECS: usize = 4096; // 68 minutes
 
 enum Task {
-    NormalTask(Box<FnBox(&VerifierCore) -> Result<()> + Send + 'static>),
-    RepeatingTask(Arc<Fn(&VerifierCore) -> Result<()> + Sync + Send + 'static>, usize),
+    NormalTask(Box<dyn FnBox(&VerifierCore) -> Result<()> + Send + 'static>),
+    RepeatingTask(Arc<dyn Fn(&VerifierCore) -> Result<()> + Sync + Send + 'static>, usize),
 }
 struct TaskList {
     task: Task, next: Option<Box<TaskList>>,
@@ -81,9 +81,7 @@ impl TaskManager {
         Ok(tasks)
     }
 
-    pub fn dispatch_task<F>(
-        &self, f: F
-    ) where F: FnOnce(&VerifierCore) -> Result<()> + Send + 'static {
+    pub fn dispatch_task(&self, f: impl FnOnce(&VerifierCore) -> Result<()> + Send + 'static) {
         let core_ref = self.0.core_ref.clone();
         self.0.pool.lock().execute(move || {
             error_report::catch_error(|| {
@@ -102,9 +100,9 @@ impl TaskManager {
         let next = ring.slots[target_slot].take();
         ring.slots[target_slot] = Some(Box::new(TaskList { task, next }));
     }
-    pub fn dispatch_delayed_task<F>(
-        &self, wait: Duration, f: F
-    ) where F: FnOnce(&VerifierCore) -> Result<()> + Send + 'static {
+    pub fn dispatch_delayed_task(
+        &self, wait: Duration, f: impl FnOnce(&VerifierCore) -> Result<()> + Send + 'static
+    ) {
         let duration_secs = wait.as_secs();
         assert!(duration_secs as usize <= MAX_SECS);
         let f = Box::new(f);
@@ -114,9 +112,9 @@ impl TaskManager {
             self.push_to_ring(Task::NormalTask(f), duration_secs as usize);
         }
     }
-    pub fn dispatch_repeating_task<F>(
-        &self, period: Duration, f: F
-    ) where F: Fn(&VerifierCore) -> Result<()> + Send + Sync + 'static {
+    pub fn dispatch_repeating_task(
+        &self, period: Duration, f: impl Fn(&VerifierCore) -> Result<()> + Send + Sync + 'static
+    ) {
         let period_secs = period.as_secs();
         assert!(period_secs > 0 && period_secs as usize <= MAX_SECS);
         self.push_to_ring(Task::RepeatingTask(Arc::new(f), period_secs as usize),

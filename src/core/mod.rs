@@ -68,7 +68,7 @@ impl CoreRef {
     pub fn get_core(&self) -> Option<VerifierCore> {
         self.0.read().as_ref().map(|x| VerifierCore(x.clone()))
     }
-    pub fn run_command(&self, command: &Command, ctx: &CommandContextData) {
+    pub fn run_command(&self, command: &Command, ctx: &dyn CommandContextData) {
         if let Some(core) = self.get_core() {
             command.run(ctx, &core);
         } else  {

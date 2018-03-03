@@ -19,12 +19,12 @@ impl FromSqlRow for () {
 }
 
 impl <T : ToSql> ToSqlArgs for T {
-    fn to_sql_args<R, F>(&self, f: F) -> Result<R> where F: FnOnce(&[&RusqliteToSql]) -> Result<R> {
+    fn to_sql_args<R>(&self, f: impl FnOnce(&[&dyn RusqliteToSql]) -> Result<R>) -> Result<R> {
         f(&[&ToSqlWrapper(self)])
     }
 }
 impl ToSqlArgs for () {
-    fn to_sql_args<R, F>(&self, f: F) -> Result<R> where F: FnOnce(&[&RusqliteToSql]) -> Result<R> {
+    fn to_sql_args<R>(&self, f: impl FnOnce(&[&dyn RusqliteToSql]) -> Result<R>) -> Result<R> {
         f(&[])
     }
 }
@@ -200,9 +200,9 @@ macro_rules! tuple_impls {
 
         #[allow(non_camel_case_types)]
         impl <$first_ty: ToSql $(, $rest_ty: ToSql)*> ToSqlArgs for ($first_ty $(, $rest_ty)*) {
-            fn to_sql_args<R, F>(
-                &self, f: F
-            ) -> Result<R> where F: FnOnce(&[&RusqliteToSql]) -> Result<R> {
+            fn to_sql_args<R>(
+                &self, f: impl FnOnce(&[&dyn RusqliteToSql]) -> Result<R>
+            ) -> Result<R> {
                 let &(ref $first_var $(, ref $rest_var)*) = self;
                 f(&[&ToSqlWrapper($first_var) $(, &ToSqlWrapper($rest_var))*])
             }

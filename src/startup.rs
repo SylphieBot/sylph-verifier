@@ -12,14 +12,14 @@ use std::process::abort;
 const LOCK_FILE_NAME: &str = "Sylph-Verifier.lock";
 const DB_FILE_NAME: &str = "Sylph-Verifier.db";
 
-fn check_lock<P: AsRef<Path>>(path: P) -> Result<File> {
+fn check_lock(path: impl AsRef<Path>) -> Result<File> {
     let mut options = OpenOptions::new();
     options.create(true).read(true).write(true);
     let lock_file = options.open(path)?;
     lock_file.try_lock_exclusive()?;
     Ok(lock_file)
 }
-fn in_path<P: AsRef<Path>>(root_path: P, file: &str) -> PathBuf {
+fn in_path(root_path: impl AsRef<Path>, file: &str) -> PathBuf {
     let mut path = PathBuf::new();
     path.push(root_path);
     path.push(file);

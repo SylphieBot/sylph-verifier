@@ -102,10 +102,10 @@ impl <T: Hash + Eq + Clone> MultiMutex<T> {
 // Concurrent cache implementation
 // TODO: Add *optional* support for tracking last access in this.
 pub struct ConcurrentCache<K: Clone + Eq + Hash + Sync, V: Sync> {
-    data: RwLock<HashMap<K, V>>, create: Box<Fn(&K) -> Result<V> + Send + Sync + 'static>,
+    data: RwLock<HashMap<K, V>>, create: Box<dyn Fn(&K) -> Result<V> + Send + Sync + 'static>,
 }
 impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
-    pub fn new<F>(f: F) -> Self where F: Fn(&K) -> Result<V> + Send + Sync + 'static {
+    pub fn new(f: impl Fn(&K) -> Result<V> + Send + Sync + 'static) -> Self  {
         ConcurrentCache {
             data: RwLock::new(HashMap::new()), create: Box::new(f),
         }
@@ -142,7 +142,7 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
         }
     }
 
-    pub fn for_each<F>(&self, mut f: F) where F: FnMut(&V) {
+    pub fn for_each(&self, mut f: impl FnMut(&V)) {
         for (_, v) in self.data.read().iter() {
             f(v);
         }
@@ -153,7 +153,7 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
     pub fn remove<Q: Eq + Hash>(&self, k: &Q) -> Option<V> where K: Borrow<Q> {
         self.data.write().remove(k)
     }
-    pub fn retain<F>(&self, mut f: F) where F: FnMut(&K, &V) -> bool {
+    pub fn retain(&self, mut f: impl FnMut(&K, &V) -> bool) {
         self.data.write().retain(|k, v| f(k, &v));
     }
     pub fn clear_cache(&self) {
