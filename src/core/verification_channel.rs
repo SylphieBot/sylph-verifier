@@ -66,7 +66,7 @@ impl VerificationChannelManager {
             let messages = channel_id.messages(|x| x.limit(100))?;
             let messages: Vec<MessageId> =
                 messages.iter().filter(|x| Some(x.id) != ignore).map(|x| x.id).collect();
-            if messages.len() == 0 {
+            if messages.is_empty() {
                 break
             }
             channel_id.delete_messages(messages)?;
@@ -129,9 +129,9 @@ impl VerificationChannelManager {
         };
 
         Ok(format!("{}{}{}{}{}",
-                   verify_intro.unwrap_or_else(|| String::new()), intro_space,
+                   verify_intro.unwrap_or_else(String::new), intro_space,
                    self.verify_instructions()?,
-                   footer_space, verify_footer.unwrap_or_else(|| String::new())))
+                   footer_space, verify_footer.unwrap_or_else(String::new)))
     }
     pub fn setup_check(&self, _: GuildId, channel_id: ChannelId) -> Result<()> {
         let messages = channel_id.messages(|x| x.limit(51))?;

@@ -393,14 +393,12 @@ impl RoleManager {
     ) -> Result<SetRolesStatus> {
         if let Some(roblox_id) = self.0.verifier.get_verified_roblox_user(discord_id)? {
             self.assign_roles(guild, discord_id, Some(roblox_id))
+        } else if update_unverified {
+            self.assign_roles(guild, discord_id, None)
         } else {
-            if update_unverified {
-                self.assign_roles(guild, discord_id, None)
-            } else {
-                let member = guild.member(discord_id)?;
-                trace!("User {} is not verified. Not changing roles.", member.distinct());
-                Ok(SetRolesStatus::NotVerified)
-            }
+            let member = guild.member(discord_id)?;
+            trace!("User {} is not verified. Not changing roles.", member.distinct());
+            Ok(SetRolesStatus::NotVerified)
         }
     }
 

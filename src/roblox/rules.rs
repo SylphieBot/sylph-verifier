@@ -454,21 +454,30 @@ impl VerificationCountContext {
     }
 }
 
-struct ValueCache<T>(Option<Option<T>>);
+enum ValueCache<T> {
+    NothingInCache,
+    CachedError,
+    Cached(T),
+}
 impl <T> ValueCache<T> {
     fn new() -> ValueCache<T> {
-        ValueCache(None)
+        ValueCache::NothingInCache
     }
 
     fn get_cached(
-        &mut self, f: impl FnOnce() -> Result<T>, g: impl FnOnce(&T) -> bool
+        &mut self, create_cached: impl FnOnce() -> Result<T>, get_value: impl FnOnce(&T) -> bool
     ) -> RuleResult {
-        if self.0.is_none() {
-            self.0 = Some(f().ok())
+        if let ValueCache::NothingInCache = self {
+            if let Some(value) = create_cached().ok() {
+                *self = ValueCache::Cached(value);
+            } else {
+                *self = ValueCache::CachedError;
+            }
         }
-        match self.0.as_ref().unwrap().as_ref() {
-            Some(x) => g(x).into(),
-            None => RuleResult::Error,
+        match self {
+            ValueCache::Cached(ref cache) => get_value(cache).into(),
+            ValueCache::CachedError => RuleResult::Error,
+            ValueCache::NothingInCache => unimplemented!(),
         }
     }
 }
@@ -489,11 +498,11 @@ impl VerificationContext {
         }
     }
 
-    fn is_banned(&mut self) -> RuleResult {
+    fn check_is_banned(&mut self) -> RuleResult {
         let id = self.user_id;
         self.is_banned.get_cached(|| api::web_profile_exists(id), |x| *x)
     }
-    fn has_trust_level(&mut self, condition: Condition) -> RuleResult {
+    fn check_has_trust_level(&mut self, condition: Condition) -> RuleResult {
         let id = self.user_id;
         self.dev_trust_level.get_cached(|| api::get_dev_trust_level(&id.lookup_username()?),
                                         |x| match *x {
@@ -501,11 +510,11 @@ impl VerificationContext {
                                             None => false,
                                         })
     }
-    fn has_roblox_badge(&mut self, asset_id: &str) -> RuleResult {
+    fn check_has_roblox_badge(&mut self, asset_id: &str) -> RuleResult {
         let id = self.user_id;
         self.badges.get_cached(|| api::get_roblox_badges(id), |x| x.contains(asset_id))
     }
-    fn is_in_group(&mut self, group_id: u64, rank: Option<Condition>) -> RuleResult {
+    fn check_is_in_group(&mut self, group_id: u64, rank: Option<Condition>) -> RuleResult {
         let id = self.user_id;
         self.groups.get_cached(|| api::get_player_groups(id),
                                |x| match rank {
@@ -513,13 +522,13 @@ impl VerificationContext {
                                    None => x.contains_key(&group_id),
                                })
     }
-    fn has_player_badge(&mut self, badge_id: u64) -> RuleResult {
+    fn check_has_player_badge(&mut self, badge_id: u64) -> RuleResult {
         let id = self.user_id;
         *self.player_badges.entry(badge_id).or_insert_with(||
             api::has_player_badge(id, badge_id).ok().into()
         )
     }
-    fn owns_asset(&mut self, asset_id: u64) -> RuleResult {
+    fn check_owns_asset(&mut self, asset_id: u64) -> RuleResult {
         let id = self.user_id;
         *self.owns_asset.entry(asset_id).or_insert_with(||
             api::owns_asset(id, asset_id).ok().into()
@@ -540,7 +549,7 @@ impl RuleResolutionContext {
 
     fn add_rule(&mut self, source: RuleSource, rule: VerificationRule, is_output: bool) {
         for dep in &rule.inputs {
-            if !self.found_rules.contains_key(&dep) {
+            if !self.found_rules.contains_key(dep) {
                 self.needed_dependencies.push_back(dep.clone());
             }
         }
@@ -557,7 +566,7 @@ impl RuleResolutionContext {
 
     fn link(mut self) -> Result<VerificationSet> {
         let mut is_refed = HashSet::new();
-        for (_, &(ref rule, _)) in &self.found_rules {
+        for (ref rule, _) in self.found_rules.values() {
             for input in &rule.inputs {
                 is_refed.insert(input.clone());
             }
@@ -575,7 +584,7 @@ impl RuleResolutionContext {
                 if rule.inputs.iter().all(|x| linked.contains_key(x)) {
                     let output_as = if is_output {
                         match source {
-                            RuleSource::CustomRule(ref rule_name) => Some(rule_name.clone()),
+                            RuleSource::CustomRule(ref rule_name) |
                             RuleSource::BuiltinRule(ref rule_name) => Some(rule_name.clone()),
                         }
                     } else {
@@ -628,9 +637,8 @@ impl RuleResolutionContext {
         }
         let mut skips = vec![usize::max_value(); skip_base];
         for (i, op) in ops.iter().enumerate() {
-            match *op {
-                RuleOp::Operator(Some(skip_id), _) => skips[skip_id] = i,
-                _ => { }
+            if let RuleOp::Operator(Some(skip_id), _) = *op {
+                skips[skip_id] = i;
             }
         }
         Ok(VerificationSet { ops, skips, stack_base: var_count, mem_size: var_count + max_stack })
@@ -766,12 +774,12 @@ impl VerificationSet {
                     };
                     state.push(val)
                 }
-                RuleOp::CheckBadge(ref name) => state.push(ctx.has_roblox_badge(name)),
-                RuleOp::CheckPlayerBadge(id) => state.push(ctx.has_player_badge(id)),
-                RuleOp::CheckOwnsAsset(asset) => state.push(ctx.owns_asset(asset)),
-                RuleOp::CheckInGroup(group, rank) => state.push(ctx.is_in_group(group, rank)),
-                RuleOp::CheckDevTrustLevel(check) => state.push(ctx.has_trust_level(check)),
-                RuleOp::CheckIsBanned => state.push(ctx.is_banned()),
+                RuleOp::CheckBadge(ref name) => state.push(ctx.check_has_roblox_badge(name)),
+                RuleOp::CheckPlayerBadge(id) => state.push(ctx.check_has_player_badge(id)),
+                RuleOp::CheckOwnsAsset(asset) => state.push(ctx.check_owns_asset(asset)),
+                RuleOp::CheckInGroup(group, rank) => state.push(ctx.check_is_in_group(group, rank)),
+                RuleOp::CheckDevTrustLevel(check) => state.push(ctx.check_has_trust_level(check)),
+                RuleOp::CheckIsBanned => state.push(ctx.check_is_banned()),
             }
             ip += 1;
         }

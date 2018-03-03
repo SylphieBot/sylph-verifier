@@ -105,7 +105,7 @@ macro_rules! config_keys {
                         if is_none {
                             let mut db_result = get_db::<$tp>(conn, guild, stringify!($name))?;
                             if guild.is_none() {
-                                if let None = db_result {
+                                if db_result.is_none() {
                                     db_result = Some($default);
                                 }
                             }

@@ -268,15 +268,15 @@ config_values! {
 
 fn set(ctx: &CommandContext, guild: Option<GuildId>) -> Result<()> {
     if ctx.argc() == 0 {
-        ctx.respond(print_config(&ctx.core, guild)?)
+        ctx.respond(print_config(ctx.core, guild)?)
     } else {
         let key = ctx.arg(0)?;
         let value = ctx.rest(1)?;
         if value.trim().is_empty() {
-            set_config(&ctx.core, guild, key, None)?;
+            set_config(ctx.core, guild, key, None)?;
             ctx.respond("Configuration option reset to default.")?;
         } else {
-            set_config(&ctx.core, guild, key, Some(value))?;
+            set_config(ctx.core, guild, key, Some(value))?;
             ctx.respond("Configuration option set.")?;
         }
         Ok(())

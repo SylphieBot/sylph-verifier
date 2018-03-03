@@ -162,7 +162,7 @@ fn find_role(guild_id: GuildId, role_name: &str) -> Result<RoleId> {
         Ok(role_id)
     } else {
         let mut found_role = None;
-        for (_, ref role) in &guild.roles {
+        for role in guild.roles.values() {
             if role.name.trim() == role_name {
                 cmd_ensure!(found_role.is_none(),
                             "Two roles named '{}' found! Consider using `<@role id>` \
@@ -293,10 +293,9 @@ pub const COMMANDS: &[Command] = &[
             let my_id = serenity::CACHE.read().user.id;
             if !role_name.is_empty() {
                 let role_id = find_role(guild_id, role_name)?;
-                if ctx.privilege_level < PrivilegeLevel::BotOwner {
-                    if !util::can_member_access_role(guild_id, msg.author.id, role_id)? {
-                        cmd_error!("You do not have permission to modify that role.")
-                    }
+                if ctx.privilege_level < PrivilegeLevel::BotOwner &&
+                   !util::can_member_access_role(guild_id, msg.author.id, role_id)? {
+                    cmd_error!("You do not have permission to modify that role.")
                 }
                 if !util::can_member_access_role(guild_id, my_id, role_id)? {
                     cmd_error!("This bot does not have permission to modify that role.")
@@ -342,9 +341,8 @@ pub const COMMANDS: &[Command] = &[
                          },
                          roblox_username,
                          match role.is_assigned {
-                             RuleResult::True => "matches the rule",
+                             RuleResult::True | RuleResult::Error => "matches the rule",
                              RuleResult::False => "does not match the rule",
-                             RuleResult::Error => "matches the rule",
                          },
                          role.rule)?
             }

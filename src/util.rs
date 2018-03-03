@@ -121,7 +121,7 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
 
             let new_value = (self.create)(k)?;
             let mut write = self.data.write();
-            if !write.contains_key(&k) {
+            if !write.contains_key(k) {
                 write.insert(k.clone(), new_value);
             }
         }
@@ -135,7 +135,7 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
 
             let new_value = (self.create)(k)?;
             let mut write = self.data.write();
-            if !write.contains_key(&k) {
+            if !write.contains_key(k) {
                 write.insert(k.clone(), new_value);
             }
             Ok(RwLockWriteGuard::map(write, |x| x.get_mut(k).unwrap()))
@@ -154,7 +154,7 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
         self.data.write().remove(k)
     }
     pub fn retain(&self, mut f: impl FnMut(&K, &V) -> bool) {
-        self.data.write().retain(|k, v| f(k, &v));
+        self.data.write().retain(|k, v| f(k, v));
     }
     pub fn clear_cache(&self) {
         *self.data.write() = HashMap::new();

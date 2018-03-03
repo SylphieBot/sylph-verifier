@@ -47,32 +47,28 @@ impl TaskManager {
         {
             let task_data = Arc::downgrade(&tasks.0);
             Builder::new().name("timer thread".to_string()).spawn(move || {
-                loop {
-                    if let Some(task_data) = task_data.upgrade() {
-                        let mut timer_ring = task_data.timer_ring.lock();
-                        let cur_pos = timer_ring.cur_pos;
-                        let mut slot = timer_ring.slots[cur_pos].take();
-                        timer_ring.cur_pos = (timer_ring.cur_pos + 1) % MAX_SECS;
-                        drop(timer_ring);
+                while let Some(task_data) = task_data.upgrade() {
+                    let mut timer_ring = task_data.timer_ring.lock();
+                    let cur_pos = timer_ring.cur_pos;
+                    let mut slot = timer_ring.slots[cur_pos].take();
+                    timer_ring.cur_pos = (timer_ring.cur_pos + 1) % MAX_SECS;
+                    drop(timer_ring);
 
-                        let tasks = TaskManager(task_data);
-                        while let Some(cur_slot) = slot {
-                            match cur_slot.task {
-                                Task::NormalTask(task) =>
-                                    tasks.dispatch_task(|core| FnBox::call_box(task, (core,))),
-                                Task::RepeatingTask(task, period_secs) => {
-                                    {
-                                        let task = task.clone();
-                                        tasks.dispatch_task(move |core| task(core));
-                                    }
-                                    tasks.push_to_ring(Task::RepeatingTask(task, period_secs),
-                                                       period_secs);
+                    let tasks = TaskManager(task_data);
+                    while let Some(cur_slot) = slot {
+                        match cur_slot.task {
+                            Task::NormalTask(task) =>
+                                tasks.dispatch_task(|core| FnBox::call_box(task, (core,))),
+                            Task::RepeatingTask(task, period_secs) => {
+                                {
+                                    let task = task.clone();
+                                    tasks.dispatch_task(move |core| task(core));
                                 }
+                                tasks.push_to_ring(Task::RepeatingTask(task, period_secs),
+                                                   period_secs);
                             }
-                            slot = cur_slot.next;
                         }
-                    } else {
-                        break
+                        slot = cur_slot.next;
                     }
                     thread::sleep(Duration::from_secs(1));
                 }
