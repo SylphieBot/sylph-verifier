@@ -55,7 +55,7 @@ enum Token<'a> {
 }
 impl <'a> fmt::Display for Token<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
+        match self {
             Token::Term(start, body)          => write!(f, "{}({})", start, body),
             Token::Literal(RuleResult::True ) => write!(f, "true"),
             Token::Literal(RuleResult::False) => write!(f, "false"),
@@ -192,7 +192,7 @@ enum RuleOp {
 }
 impl RuleOp {
     pub fn stack_change(&self) -> isize {
-        match *self {
+        match self {
             RuleOp::Read(_)                    =>  1,
             RuleOp::Output(_, _)               => -1,
             RuleOp::Literal(_)                 =>  1,
@@ -671,11 +671,11 @@ impl VerificationSet {
         for &rule_name in active_rules {
             match lookup_custom_rule(rule_name)? {
                 Some(rule) =>
-                    resolve_ctx.add_rule(RuleSource::CustomRule(rule_name.to_string()), 
+                    resolve_ctx.add_rule(RuleSource::CustomRule(rule_name.to_string()),
                                          rule, true),
                 None => match VerificationRule::get_builtin(rule_name) {
                     Some(rule) =>
-                        resolve_ctx.add_rule(RuleSource::BuiltinRule(rule_name.to_string()), 
+                        resolve_ctx.add_rule(RuleSource::BuiltinRule(rule_name.to_string()),
                                              rule, true),
                     None => cmd_error!("Unknown rule {}.", rule_name),
                 }
@@ -683,13 +683,13 @@ impl VerificationSet {
         }
         while let Some(rule_source) = resolve_ctx.next_needed() {
             match rule_source.clone() {
-                RuleSource::BuiltinRule(rule_name) => 
+                RuleSource::BuiltinRule(rule_name) =>
                     match VerificationRule::get_builtin(&rule_name) {
                         Some(rule) =>
                             resolve_ctx.add_rule(RuleSource::BuiltinRule(rule_name), rule, false),
                         None => cmd_error!("Unknown built-in rule {}.", rule_name),
                     },
-                RuleSource::CustomRule(rule_name) => 
+                RuleSource::CustomRule(rule_name) =>
                     match lookup_custom_rule(&rule_name)? {
                         Some(rule) =>
                             resolve_ctx.add_rule(RuleSource::CustomRule(rule_name), rule, false),
@@ -733,10 +733,10 @@ impl VerificationSet {
                 },
                 RuleOp::Output(ref var, ref name) => {
                     let val = state.pop();
-                    if let &Some(var) = var {
+                    if let Some(var) = *var {
                         state.set_var(var, val);
                     }
-                    if let &Some(ref name) = name {
+                    if let Some(ref name) = name {
                         outputs.insert(name.as_str(), val);
                     }
                 },

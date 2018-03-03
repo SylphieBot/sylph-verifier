@@ -17,7 +17,7 @@ enum CommandFn {
 }
 impl CommandFn {
     fn call(&self, ctx: &CommandContext) -> Result<()> {
-        match *self {
+        match self {
             CommandFn::Normal(f) => f(ctx),
             CommandFn::Discord(f) => match ctx.discord_context() {
                 Some((discord_ctx, message)) => f(ctx, discord_ctx, message),

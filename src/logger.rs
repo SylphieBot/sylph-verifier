@@ -103,7 +103,7 @@ impl LogFileOutput {
         Ok(())
     }
     fn check_open_new(&mut self, log_dir: &PathBuf) -> Result<()> {
-        let needs_refresh = match *self {
+        let needs_refresh = match self {
             LogFileOutput::NotInitialized => true,
             LogFileOutput::Initialized { ref date, .. } => date != &Local::today(),
         };
@@ -114,7 +114,7 @@ impl LogFileOutput {
     }
     fn log(&mut self, log_dir: &PathBuf, line: &str) -> Result<()> {
         self.check_open_new(log_dir)?;
-        if let &mut LogFileOutput::Initialized { ref mut out, .. } = self {
+        if let LogFileOutput::Initialized { ref mut out, .. } = self {
             write!(out, "{}{}", line, NEW_LINE)?;
             out.flush()?;
             Ok(())
@@ -132,10 +132,10 @@ enum ErrorLogBuf {
 }
 impl ErrorLogBuf {
     fn push_log(&mut self, line: String) {
-        if let &mut ErrorLogBuf::NotInitialized = self {
+        if let ErrorLogBuf::NotInitialized = self {
             *self = ErrorLogBuf::Initialized(VecDeque::new());
         }
-        if let &mut ErrorLogBuf::Initialized(ref mut vec) = self {
+        if let ErrorLogBuf::Initialized(ref mut vec) = self {
             vec.push_back(line);
             if vec.len() > STORE_LOG_LINES {
                 vec.pop_front();
@@ -146,7 +146,7 @@ impl ErrorLogBuf {
     }
 
     fn format_logs(&self) -> Result<String> {
-        if let &ErrorLogBuf::Initialized(ref vec) = self {
+        if let ErrorLogBuf::Initialized(ref vec) = self {
             let mut buffer = String::new();
             for line in vec {
                 writeln!(buffer, "{}", line)?;

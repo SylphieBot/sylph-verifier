@@ -27,7 +27,7 @@ enum VerificationRulesStatus {
 }
 impl VerificationRulesStatus {
     pub fn is_compiled(&self) -> bool {
-        match *self {
+        match self {
             VerificationRulesStatus::NotCompiled => false,
             _ => true,
         }

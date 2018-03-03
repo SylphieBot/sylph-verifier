@@ -86,7 +86,7 @@ struct Handler {
 }
 impl Handler {
     fn context_str(channel: &Channel) -> Cow<str> {
-        match *channel {
+        match channel {
             Channel::Guild(ref channel) => {
                 let channel = channel.read();
                 if let Some(guild) = channel.guild() {
@@ -104,7 +104,7 @@ impl Handler {
     fn message_info(
         user_id: UserId, channel: &Channel, bot_owner_id: Option<UserId>,
     ) -> Result<(PrivilegeLevel, CommandTarget)> {
-        Ok(match *channel {
+        Ok(match channel {
             Channel::Guild(ref channel) => {
                 let guild = channel.read().guild()?;
                 let guild = guild.read();

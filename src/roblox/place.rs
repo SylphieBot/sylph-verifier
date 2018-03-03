@@ -233,7 +233,7 @@ pub enum LuaConfigValue<'a> {
 }
 impl <'a> Display for LuaConfigValue<'a> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match *self {
+        match self {
             LuaConfigValue::Binary(ref b) => {
                 write!(f, "\"")?;
                 for byte in b.iter() {
@@ -243,7 +243,7 @@ impl <'a> Display for LuaConfigValue<'a> {
                 Ok(())
             }
             LuaConfigValue::String(ref s) => write!(f, "[[{}]]", s.replace("]", "]]..']'..[[")),
-            LuaConfigValue::Double(val) => val.fmt(f),
+            LuaConfigValue::Double(ref val) => val.fmt(f),
             LuaConfigValue::Nil => f.write_str("nil"),
         }
     }

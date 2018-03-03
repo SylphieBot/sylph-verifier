@@ -117,7 +117,7 @@ to_rusqlite! {
 }
 impl <T: ToSql> ToSql for Option<T> {
     fn to_sql(&self) -> Result<ToSqlOutput> {
-        match *self {
+        match self {
             None => Ok(ToSqlOutput::Owned(Value::Null)),
             Some(ref t) => t.to_sql(),
         }

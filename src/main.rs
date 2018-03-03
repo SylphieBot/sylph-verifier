@@ -1,6 +1,6 @@
 #![warn(unused_extern_crates)]
 #![recursion_limit="128"]
-#![feature(nll, box_patterns, never_type, integer_atomics, fnbox,
+#![feature(nll, box_patterns, match_default_bindings, never_type, integer_atomics, fnbox,
            const_fn, conservative_impl_trait, try_trait)]
 #![deny(unused_must_use)]
 

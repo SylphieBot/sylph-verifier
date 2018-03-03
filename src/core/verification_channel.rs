@@ -88,7 +88,7 @@ impl VerificationChannelManager {
     }
     pub fn check_verification_channels_ready(&self, ready: &Ready, ) -> Result<()> {
         for guild in &ready.guilds {
-            match *guild {
+            match guild {
                 GuildStatus::OnlineGuild(ref guild) =>
                     self.delete_old_messages(guild.id).drop_nonfatal()?,
                 GuildStatus::OnlinePartialGuild(ref guild) =>
