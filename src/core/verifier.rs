@@ -72,7 +72,7 @@ impl TokenParameters {
     }
 
     fn sha256_token(&self, data: &str) -> Token {
-        let mut mac = Hmac::<Sha256>::new(&self.key).unwrap();
+        let mut mac = Hmac::<Sha256>::new_varkey(&self.key).unwrap();
         mac.input(data.as_bytes());
         let result = mac.result();
         let code = result.code();
