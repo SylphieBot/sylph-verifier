@@ -6,7 +6,7 @@ use util;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 enum GuildShowType {
-    AlwaysShow, OnlyInTerminal, OnlyInGuild, AlwaysHidden,
+    AlwaysShow, OnlyInTerminal, OnlyInGuild,
 }
 impl GuildShowType {
     fn show_in(self, guild: Option<GuildId>) -> bool {
@@ -14,7 +14,6 @@ impl GuildShowType {
             GuildShowType::AlwaysShow     => true,
             GuildShowType::OnlyInTerminal => guild.is_none(),
             GuildShowType::OnlyInGuild    => guild.is_some(),
-            GuildShowType::AlwaysHidden   => false,
         }
     }
 }
@@ -73,9 +72,7 @@ macro_rules! config_values {
             let mut config = String::new();
             let align = if guild.is_some() { "   " } else { "  " };
             $({
-                let show_type: fn(&VerifierCore) -> Result<GuildShowType> = $show_type;
-
-                if show_type(core)?.show_in(guild) {
+                if $show_type.show_in(guild) {
                     let to_str: fn(&VerifierCore, $tp) -> Result<String> = $to_str;
                     let value = core.config().get(guild, ConfigKeys::$config_key)?;
                     writeln!(config, "• {} = {}{}",
@@ -94,82 +91,82 @@ macro_rules! config_values {
 }
 config_values! {
     prefix<String>(
-        CommandPrefix, false, |_| Ok(GuildShowType::AlwaysShow),
+        CommandPrefix, false, GuildShowType::AlwaysShow,
         "The prefix used before commands.",
         |x| Ok(x.to_owned()), print_quoted);
     discord_token<Option<String>>(
-        DiscordToken, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        DiscordToken, false, GuildShowType::OnlyInTerminal,
         "The bot token used to connect to Discord.",
         |x|    Ok(Some(x.to_owned())),
         |_, x| Ok(x.map_or("(not set)", |_| "<token redacted>").to_owned()));
     bot_owner_id<Option<u64>>(
-        BotOwnerId, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        BotOwnerId, false, GuildShowType::OnlyInTerminal,
         "The user ID of the bot's owner. That account can bypass permissions on any server.",
         |x|    parse_u64(x).map(Some),
         |_, x| Ok(x.map_or("(not set)".to_string(), |x| format!("{}", x)).to_owned()));
 
     set_nickname<bool>(
-        SetNickname, true, |_| Ok(GuildShowType::AlwaysShow),
+        SetNickname, true, GuildShowType::OnlyInGuild,
         "Whether to set a user's nickname to their Roblox username while updating their roles.",
         parse_bool, print_display);
     set_roles_on_join<bool>(
-        SetRolesOnJoin, true, |x| Ok(GuildShowType::AlwaysShow),
+        SetRolesOnJoin, true, GuildShowType::OnlyInGuild,
         "Whether to set a user's roles on server join based on an existing verification.",
         parse_bool, print_display);
     auto_update_roles<bool>(
-        EnableAutoUpdate, true, |x| Ok(GuildShowType::AlwaysShow),
+        EnableAutoUpdate, true, GuildShowType::OnlyInGuild,
         "Whether to periodically update a user's roles when they talk.",
         parse_bool, print_display);
     auto_update_unverified_roles<bool>(
-        EnableAutoUpdateUnverified, true, |x| Ok(GuildShowType::AlwaysShow),
+        EnableAutoUpdateUnverified, true, GuildShowType::OnlyInGuild,
         "Whether the bot will auto-update the roles of users who aren't verified \
          (i.e. remove them).",
         parse_bool, print_display);
 
     update_cooldown<u64>(
-        UpdateCooldownSeconds, true, |_| Ok(GuildShowType::AlwaysShow),
+        UpdateCooldownSeconds, true, GuildShowType::OnlyInGuild,
         "The number of seconds a user must wait between manual role updates.",
         parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
     auto_update_cooldown<u64>(
-        AutoUpdateCooldownSeconds, true, |_| Ok(GuildShowType::AlwaysShow),
+        AutoUpdateCooldownSeconds, true, GuildShowType::OnlyInGuild,
         "The number of seconds between automatic role updates.",
         parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
 
     place_ui_title<String>(
-        PlaceUITitle, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        PlaceUITitle, false, GuildShowType::OnlyInTerminal,
         "The title of the verification place UI.",
         |x| Ok(x.to_owned()), print_quoted);
     place_ui_instructions<String>(
-        PlaceUIInstructions, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        PlaceUIInstructions, false, GuildShowType::OnlyInTerminal,
         "The instructions shown in the verification place UI.",
         |x| Ok(x.to_owned()), print_quoted);
     place_ui_background<Option<String>>(
-        PlaceUIBackground, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        PlaceUIBackground, false, GuildShowType::OnlyInTerminal,
         "The Asset ID shown in the verification place UI background.",
         |x|    Ok(Some(x.to_owned())),
         |_, x| Ok(x.unwrap_or_else(|| "(default)".to_owned())));
     place_id<Option<u64>>(
-        PlaceID, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        PlaceID, false, GuildShowType::OnlyInTerminal,
         "The ID of the verification place. This is displayed in verification channel messages.",
         |x| parse_u64(x).map(Some),
         |_, x| Ok(x.map_or_else(|| "*(none set)*".to_owned(), |x| format!("{}", x))));
 
     verification_attempt_limit<u32>(
-        VerificationAttemptLimit, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        VerificationAttemptLimit, false, GuildShowType::OnlyInTerminal,
         "How many times a user can verify in a row before they must wait a period of time.",
         parse_u32, print_display);
     verification_cooldown<u64>(
-        VerificationCooldownSeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        VerificationCooldownSeconds, false, GuildShowType::OnlyInTerminal,
         "How many seconds a user must wait to attempt to verify after using up the attempt limit.",
         parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
 
     verification_channel_intro<Option<String>>(
-        VerificationChannelIntro, true, |_| Ok(GuildShowType::OnlyInGuild),
+        VerificationChannelIntro, true, GuildShowType::OnlyInGuild,
         "A sentence that you can add to the start of your server's verification message.",
         |x| Ok(Some(x.to_owned())),
         |_, x| Ok(x.map_or_else(|| "*(none set)*".to_owned(), |x| format!("\"{}\"", x))));
     verification_channel_delete_timer<u32>(
-        VerificationChannelDeleteSeconds, true, |_| Ok(GuildShowType::OnlyInGuild),
+        VerificationChannelDeleteSeconds, true, GuildShowType::OnlyInGuild,
         "How many seconds to wait before deleting responses in a verification channel.",
         |x| {
             let secs = parse_u32(x)?;
@@ -178,26 +175,26 @@ config_values! {
         },
         |_, x| Ok(util::to_english_time_precise(x as u64)));
     verification_channel_footer<Option<String>>(
-        VerificationChannelFooter, true, |_| Ok(GuildShowType::OnlyInGuild),
+        VerificationChannelFooter, true, GuildShowType::OnlyInGuild,
         "A sentence that you can add to the bottom of your server's verification message.",
         |x| Ok(Some(x.to_owned())),
         |_, x| Ok(x.map_or_else(|| "*(none set)*".to_owned(), |x| format!("\"{}\"", x))));
 
     token_validity<u32>(
-        TokenValiditySeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        TokenValiditySeconds, false, GuildShowType::OnlyInTerminal,
         "How many seconds a verification token is valid for.",
         parse_u32, |_, x| Ok(util::to_english_time_precise(x as u64)));
 
     allow_reverify_discord_account<bool>(
-        AllowReverifyDiscord, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        AllowReverifyDiscord, false, GuildShowType::OnlyInTerminal,
         "Whether a user can reverify a Discord account that is already verified.",
         parse_bool, print_display);
     allow_reverify_roblox_account<bool>(
-        AllowReverifyRoblox, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        AllowReverifyRoblox, false, GuildShowType::OnlyInTerminal,
         "Whether a user can reverify a Roblox account that is already verified.",
         parse_bool, print_display);
     reverification_cooldown<u64>(
-        ReverificationCooldownSeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),
+        ReverificationCooldownSeconds, false, GuildShowType::OnlyInTerminal,
         "How many seconds a user must wait after verifying before they can reverify.",
         parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
 }
