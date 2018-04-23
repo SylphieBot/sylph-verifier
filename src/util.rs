@@ -100,7 +100,6 @@ impl <T: Hash + Eq + Clone> MultiMutex<T> {
 }
 
 // Concurrent cache implementation
-// TODO: Add *optional* support for tracking last access in this.
 pub struct ConcurrentCache<K: Clone + Eq + Hash + Sync, V: Sync> {
     data: RwLock<HashMap<K, V>>, create: Box<dyn Fn(&K) -> Result<V> + Send + Sync + 'static>,
 }

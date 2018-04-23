@@ -5,10 +5,7 @@
 #![deny(unused_must_use)]
 #![warn(rust_2018_idioms, edition_2018, future_incompatible)]
 
-// TODO: Clean up general program structure
-// TODO: Clean up program thread usage
 // TODO: Pass around IDs less to touch Serenity's cache less.
-// TODO: Add statistics tracking to better understand current bot load.
 // TODO: Add logging for verifications to a log channel.
 // TODO: Rewrite to be async.
 

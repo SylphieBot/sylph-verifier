@@ -21,7 +21,6 @@ use util;
 use util::MultiMutex;
 
 // TODO: Batch delete operations.
-// TODO: Toss potentially long operations into the thread pool.
 
 struct DiscordContext<'a> {
     ctx: Context, message: &'a Message, content: &'a str, prefix: String,
