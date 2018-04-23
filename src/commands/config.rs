@@ -40,31 +40,6 @@ fn print_display(_: &VerifierCore, t: impl Display) -> Result<String> {
 fn print_quoted(_: &VerifierCore, t: impl Display) -> Result<String> {
     Ok(format!("\"{}\"", t))
 }
-fn print_bounded_time(core: &VerifierCore, secs: u64, bound: ConfigKey<u64>) -> Result<String> {
-    let bound = core.config().get(None, bound)?;
-    Ok(format!("{}{}",
-               util::to_english_time_precise(secs),
-               if bound == 0 {
-                   String::new()
-               } else {
-                   format!(" *(This option has a minimum value of {} set.)*",
-                           util::to_english_time_precise(bound))
-               }))
-}
-fn show_if(core: &VerifierCore, key: ConfigKey<bool>) -> Result<GuildShowType> {
-    if core.config().get(None, key)? {
-        Ok(GuildShowType::AlwaysShow)
-    } else {
-        Ok(GuildShowType::AlwaysHidden)
-    }
-}
-fn show_in_terminal_if(core: &VerifierCore, key: ConfigKey<bool>) -> Result<GuildShowType> {
-    if core.config().get(None, key)? {
-        Ok(GuildShowType::OnlyInTerminal)
-    } else {
-        Ok(GuildShowType::AlwaysHidden)
-    }
-}
 
 macro_rules! config_values {
     ($($config_name:ident<$tp:ty>(
@@ -133,71 +108,32 @@ config_values! {
         |x|    parse_u64(x).map(Some),
         |_, x| Ok(x.map_or("(not set)".to_string(), |x| format!("{}", x)).to_owned()));
 
-    roles_enable_limits<bool>(
-        RolesEnableLimits, false, |_| Ok(GuildShowType::OnlyInTerminal),
-        "Whether resource limits are enabled for verification rule sets.",
-        parse_bool, print_display);
-    roles_max_assigned<u32>(
-        RolesMaxAssigned, false, |x| show_if(x, ConfigKeys::RolesEnableLimits),
-        "The max number of roles that can be assigned in a server's configuration.",
-        parse_u32, print_display);
-    roles_max_custom_rules<u32>(
-        RolesMaxCustomRules, false, |x| show_if(x, ConfigKeys::RolesEnableLimits),
-        "The max number of custom rules that can exist in a server's configuration.",
-        parse_u32, print_display);
-    roles_max_instructions<u32>(
-        RolesMaxInstructions, false, |x| show_in_terminal_if(x, ConfigKeys::RolesEnableLimits),
-        "The maximum complexity of a role configuration.",
-        parse_u32, print_display);
-    roles_max_web_requests<u32>(
-        RolesMaxWebRequests, false, |x| show_in_terminal_if(x, ConfigKeys::RolesEnableLimits),
-        "The maximum number of web requests that a role configuration can make.",
-        parse_u32, print_display);
-
     set_nickname<bool>(
         SetNickname, true, |_| Ok(GuildShowType::AlwaysShow),
         "Whether to set a user's nickname to their Roblox username while updating their roles.",
         parse_bool, print_display);
-
-    allow_set_roles_on_join<bool>(
-        AllowSetRolesOnJoin, false, |_| Ok(GuildShowType::OnlyInTerminal),
-        "Whether servers can be configured to update a user's roles on server join.",
-        parse_bool, print_display);
     set_roles_on_join<bool>(
-        SetRolesOnJoin, true, |x| show_if(x, ConfigKeys::AllowSetRolesOnJoin),
+        SetRolesOnJoin, true, |x| Ok(GuildShowType::AlwaysShow),
         "Whether to set a user's roles on server join based on an existing verification.",
         parse_bool, print_display);
-
-    allow_auto_update_roles<bool>(
-        AllowEnableAutoUpdate, false, |_| Ok(GuildShowType::OnlyInTerminal),
-        "Whether servers can be configured to periodically update a user's roles when they talk.",
-        parse_bool, print_display);
     auto_update_roles<bool>(
-        EnableAutoUpdate, true, |x| show_if(x, ConfigKeys::AllowEnableAutoUpdate),
+        EnableAutoUpdate, true, |x| Ok(GuildShowType::AlwaysShow),
         "Whether to periodically update a user's roles when they talk.",
         parse_bool, print_display);
     auto_update_unverified_roles<bool>(
-        EnableAutoUpdateUnverified, true, |x| show_if(x, ConfigKeys::AllowEnableAutoUpdate),
+        EnableAutoUpdateUnverified, true, |x| Ok(GuildShowType::AlwaysShow),
         "Whether the bot will auto-update the roles of users who aren't verified \
          (i.e. remove them).",
         parse_bool, print_display);
 
-    minimum_update_cooldown<u64>(
-        MinimumUpdateCooldownSeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),
-        "The minimum cooldown between manual role updates a server can configure.",
-        parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
     update_cooldown<u64>(
         UpdateCooldownSeconds, true, |_| Ok(GuildShowType::AlwaysShow),
         "The number of seconds a user must wait between manual role updates.",
-        parse_u64, |c, x| print_bounded_time(c, x, ConfigKeys::MinimumUpdateCooldownSeconds));
-    minimum_auto_update_cooldown<u64>(
-        MinimumAutoUpdateCooldownSeconds, false, |_| Ok(GuildShowType::OnlyInTerminal),
-        "The minimum cooldown between automatic role updates a server can configure.",
         parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
     auto_update_cooldown<u64>(
         AutoUpdateCooldownSeconds, true, |_| Ok(GuildShowType::AlwaysShow),
         "The number of seconds between automatic role updates.",
-        parse_u64, |c, x| print_bounded_time(c, x, ConfigKeys::MinimumAutoUpdateCooldownSeconds));
+        parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
 
     place_ui_title<String>(
         PlaceUITitle, false, |_| Ok(GuildShowType::OnlyInTerminal),

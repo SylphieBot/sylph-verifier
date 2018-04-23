@@ -208,26 +208,13 @@ config_keys! {
     DiscordToken<Option<String>>(None, |_, core| core.discord().reconnect());
     BotOwnerId<Option<u64>>(None);
 
-    // Limits for verification rules
-    RolesEnableLimits<bool>(false, |_, core| Ok(core.roles().clear_rule_cache()));
-    RolesMaxAssigned<u32>(15, |_, core| Ok(core.roles().clear_rule_cache()));
-    RolesMaxCustomRules<u32>(30, |_, core| Ok(core.roles().clear_rule_cache()));
-    RolesMaxInstructions<u32>(500, |_, core| Ok(core.roles().clear_rule_cache()));
-    RolesMaxWebRequests<u32>(10, |_, core| Ok(core.roles().clear_rule_cache()));
-
     // Role management settings
     SetNickname<bool>(true);
-
-    AllowSetRolesOnJoin<bool>(true);
     SetRolesOnJoin<bool>(false);
-
-    AllowEnableAutoUpdate<bool>(true);
     EnableAutoUpdate<bool>(false);
     EnableAutoUpdateUnverified<bool>(false);
 
-    MinimumUpdateCooldownSeconds<u64>(60 * 60);
     UpdateCooldownSeconds<u64>(60 * 60);
-    MinimumAutoUpdateCooldownSeconds<u64>(60 * 60);
     AutoUpdateCooldownSeconds<u64>(60 * 60 * 24);
 
     // Verification place settings

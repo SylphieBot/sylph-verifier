@@ -7,7 +7,6 @@ use parking_lot::RwLock;
 use serenity;
 use serenity::model::prelude::*;
 use std::borrow::Cow;
-use std::cmp::max;
 use std::collections::HashMap;
 use std::mem::drop;
 use std::sync::Arc;
@@ -74,7 +73,7 @@ impl RoleManager {
 
     fn get_configuration_internal(
         &self, conn: &DatabaseConnection, guild: GuildId
-    ) -> Result<(HashMap<String, ConfiguredRole>, usize, usize)> {
+    ) -> Result<HashMap<String, ConfiguredRole>> {
         // We don't have FULL OUTER JOIN in sqlite, so, we improvise a bit.
         let active_rules_list = conn.query(
             "SELECT rule_name, discord_role_id, last_updated \
@@ -86,9 +85,6 @@ impl RoleManager {
              FROM guild_custom_rules \
              WHERE discord_guild_id = ?1", guild,
         ).get_all::<(String, String, SystemTime)>()?;
-
-        let active_rules_count = active_rules_list.len();
-        let custom_rules_count = custom_rules_list.len();
 
         let mut map = HashMap::new();
         for (rule_name, role_id, last_updated) in active_rules_list {
@@ -108,37 +104,15 @@ impl RoleManager {
                 });
             }
         }
-        Ok((map, active_rules_count, custom_rules_count))
+        Ok(map)
     }
     pub fn get_configuration(&self, guild: GuildId) -> Result<HashMap<String, ConfiguredRole>> {
-        Ok(self.get_configuration_internal(&self.0.database.connect()?, guild)?.0)
+        Ok(self.get_configuration_internal(&self.0.database.connect()?, guild)?)
     }
     fn build_for_guild(
         &self, conn: &DatabaseConnection, guild: GuildId
     ) -> Result<VerificationRulesStatus> {
-        let (configuration, active_count, custom_count) =
-            self.get_configuration_internal(conn, guild)?;
-
-        let limits_enabled = self.0.config.get(None, ConfigKeys::RolesEnableLimits)?;
-        if limits_enabled {
-            let max_assigned = self.0.config.get(None, ConfigKeys::RolesMaxAssigned)?;
-            if active_count > max_assigned as usize {
-                return Ok(VerificationRulesStatus::Error(format!(
-                    "Too many roles are configured to be assigned. \
-                     ({} roles are active, maximum is {}.)",
-                    active_count, max_assigned
-                ).into()))
-            }
-
-            let max_custom = self.0.config.get(None, ConfigKeys::RolesMaxCustomRules)?;
-            if custom_count > max_custom as usize {
-                return Ok(VerificationRulesStatus::Error(format!(
-                    "Too many custom roles exist. \
-                     ({} custom roles exist, maximum is {}.)",
-                    custom_count, max_custom
-                ).into()))
-            }
-        }
+        let configuration = self.get_configuration_internal(conn, guild)?;
 
         let mut active_rule_names = Vec::new();
         for (rule, config) in &configuration {
@@ -152,35 +126,12 @@ impl RoleManager {
                 Ok(None), |condition| VerificationRule::from_str(condition).map(Some))
         }) {
             Ok(set) => {
-                if limits_enabled {
-                    let max_instructions =
-                        self.0.config.get(None, ConfigKeys::RolesMaxInstructions)?;
-                    if set.instruction_count() > max_instructions as usize {
-                        return Ok(VerificationRulesStatus::Error(format!(
-                            "Role configuration is too complex. (Complexity is {}, maximum is {}.)",
-                            set.instruction_count(), max_instructions
-                        ).into()))
-                    }
-
-                    let web_requests = set.max_web_requests();
-                    let max_web_requests =
-                        self.0.config.get(None, ConfigKeys::RolesMaxWebRequests)?;
-                    if web_requests > max_web_requests as usize {
-                        return Ok(VerificationRulesStatus::Error(format!(
-                            "Role configuration makes to many web requests. \
-                             (Configuration makes {} web requests, maximum is {}.)",
-                            web_requests, max_web_requests
-                        ).into()))
-                    }
-                }
-
                 let mut active_rules = HashMap::new();
                 for (rule, config) in configuration {
                     if let Some(role_id) = config.role_id {
                         active_rules.insert(rule, role_id);
                     }
                 }
-
                 Ok(VerificationRulesStatus::Compiled(set, active_rules))
             }
             Err(match_err!(ErrorKind::CommandError(err))) =>
@@ -220,21 +171,6 @@ impl RoleManager {
                 cmd_error!("No rule name '{}' found.", rule_name);
             }
 
-            let limits_enabled = self.0.config.get(None, ConfigKeys::RolesEnableLimits)?;
-            if limits_enabled {
-                let max_assigned = self.0.config.get(None, ConfigKeys::RolesMaxAssigned)?;
-                let assigned_count = conn.query(
-                    "SELECT COUNT(*) FROM guild_active_rules \
-                     WHERE discord_guild_id = ?1 AND rule_name != ?2",
-                    (guild, rule_name)
-                ).get::<u32>()?;
-                if assigned_count + 1 > max_assigned {
-                    cmd_error!("Too many roles are configured to be assigned. \
-                                (Including '{}', {} roles are active, maximum is {}.)",
-                               rule_name, assigned_count + 1, max_assigned);
-                }
-            }
-
             if let Some(discord_role) = discord_role {
                 conn.execute(
                     "REPLACE INTO guild_active_rules (\
@@ -259,23 +195,7 @@ impl RoleManager {
         &self, guild: GuildId, rule_name: &str, condition: Option<&str>
     ) -> Result<()> {
         if let Some(condition) = condition {
-            let conn =  self.0.database.connect()?;
-
-            let limits_enabled = self.0.config.get(None, ConfigKeys::RolesEnableLimits)?;
-            if limits_enabled {
-                let max_custom = self.0.config.get(None, ConfigKeys::RolesMaxCustomRules)?;
-                let custom_count = conn.query(
-                    "SELECT COUNT(*) FROM guild_custom_rules \
-                     WHERE discord_guild_id = ?1 AND rule_name != ?2",
-                    (guild, rule_name)
-                ).get::<u32>()?;
-                if custom_count + 1 > max_custom {
-                    cmd_error!("Too many custom rules exist. \
-                                (Including '{}', {} rules exist, maximum is {}.)",
-                               rule_name, custom_count + 1, max_custom);
-                }
-            }
-
+            let conn = self.0.database.connect()?;
             match VerificationRule::from_str(condition) {
                 Ok(_) => { }
                 Err(err) => cmd_error!("Failed to parse custom rule: {}", err),
@@ -336,8 +256,8 @@ impl RoleManager {
         let mut member = guild.member(discord_id)?;
         let my_id = serenity::CACHE.read().user.id;
         let can_access_user = util::can_member_access_member(guild, my_id, discord_id)?;
-
         let do_set_nickname = self.0.config.get(None, ConfigKeys::SetNickname)?;
+
         if can_access_user && do_set_nickname {
             let target_nickname = if let Some(roblox_id) = roblox_id {
                 Some(format!("{}\u{17B5}", roblox_id.lookup_username()?))
@@ -353,8 +273,7 @@ impl RoleManager {
         let mut determine_roles_error = false;
         let mut set_roles_error = false;
         if let Some(roblox_id) = roblox_id {
-            let assigned_roles = self.get_assigned_roles(guild, roblox_id)?;
-            for role in assigned_roles {
+            for role in self.get_assigned_roles(guild, roblox_id)? {
                 match role.is_assigned {
                     RuleResult::True  => if !member.roles.contains(&role.role_id) {
                         trace!("Adding role to {}: {}", member.distinct(), role.role_id.0);
@@ -456,20 +375,12 @@ impl RoleManager {
             VerificationRulesStatus::NotCompiled => unimplemented!(),
         }
     }
-    pub fn clear_rule_cache(&self) {
-        self.0.rule_cache.clear_cache()
-    }
 
     pub fn check_roles_update_msg(&self, guild_id: GuildId, user_id: UserId) -> Result<()> {
         if user_id != serenity::CACHE.read().user.id {
-            let set_roles_on_join =
-                self.0.config.get(None, ConfigKeys::AllowEnableAutoUpdate)? &&
-                self.0.config.get(Some(guild_id), ConfigKeys::EnableAutoUpdate)?;
-            if set_roles_on_join {
-                let auto_update_cooldown = max(
-                    self.0.config.get(None, ConfigKeys::MinimumAutoUpdateCooldownSeconds)?,
-                    self.0.config.get(Some(guild_id), ConfigKeys::AutoUpdateCooldownSeconds)?
-                );
+            if self.0.config.get(Some(guild_id), ConfigKeys::EnableAutoUpdate)? {
+                let auto_update_cooldown =
+                    self.0.config.get(Some(guild_id), ConfigKeys::AutoUpdateCooldownSeconds)?;
                 let update_unverified =
                     self.0.config.get(Some(guild_id), ConfigKeys::EnableAutoUpdateUnverified)?;
                 let roles = self.clone();
@@ -484,10 +395,7 @@ impl RoleManager {
     }
     pub fn check_roles_update_join(&self, guild_id: GuildId, member: Member) -> Result<()> {
         if member.user.read().id != serenity::CACHE.read().user.id {
-            let set_roles_on_join =
-                self.0.config.get(None, ConfigKeys::AllowSetRolesOnJoin)? &&
-                self.0.config.get(Some(guild_id), ConfigKeys::SetRolesOnJoin)?;
-            if set_roles_on_join {
+            if self.0.config.get(Some(guild_id), ConfigKeys::SetRolesOnJoin)? {
                 let roles = self.clone();
                 let user_id = member.user.read().id;
                 self.0.tasks.dispatch_task(move |_| {

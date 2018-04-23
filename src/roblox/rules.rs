@@ -407,53 +407,6 @@ impl fmt::Display for VerificationRule {
     }
 }
 
-struct VerificationCountContext {
-    username: bool, dev_trust_level: bool, badges: bool, groups: bool,
-    profile_exists: bool, player_badges: HashSet<u64>, owns_asset: HashSet<u64>,
-}
-impl VerificationCountContext {
-    fn new() -> VerificationCountContext {
-        VerificationCountContext {
-            username: false, dev_trust_level: false, badges: false, groups: false,
-            profile_exists: false, player_badges: HashSet::new(), owns_asset: HashSet::new(),
-        }
-    }
-
-    fn uses_is_banned(&mut self) {
-        self.profile_exists = true;
-    }
-    fn uses_username(&mut self) {
-        self.username = true;
-    }
-    fn uses_dev_trust_level(&mut self) {
-        self.uses_username();
-        self.dev_trust_level = true;
-    }
-    fn uses_badges(&mut self) {
-        self.badges = true;
-    }
-    fn uses_groups(&mut self) {
-        self.groups = true;
-    }
-    fn uses_has_player_badge(&mut self, badge_id: u64) {
-        self.player_badges.insert(badge_id);
-    }
-    fn uses_owns_asset(&mut self, asset_id: u64) {
-        self.owns_asset.insert(asset_id);
-    }
-
-    fn count(&self) -> usize {
-        let mut count = 0;
-        if self.username        { count += 1 }
-        if self.dev_trust_level { count += 1 }
-        if self.badges          { count += 1 }
-        if self.groups          { count += 1 }
-        count += self.player_badges.len();
-        count += self.owns_asset.len();
-        count
-    }
-}
-
 enum ValueCache<T> {
     NothingInCache,
     CachedError,
@@ -708,25 +661,6 @@ impl VerificationSet {
         }
 
         resolve_ctx.link()
-    }
-
-    pub fn instruction_count(&self) -> usize {
-        self.ops.len()
-    }
-    pub fn max_web_requests(&self) -> usize {
-        let mut ctx = VerificationCountContext::new();
-        for op in &self.ops {
-            match *op {
-                RuleOp::CheckBadge(_) => ctx.uses_badges(),
-                RuleOp::CheckPlayerBadge(id) => ctx.uses_has_player_badge(id),
-                RuleOp::CheckOwnsAsset(asset) => ctx.uses_owns_asset(asset),
-                RuleOp::CheckInGroup(_, _) => ctx.uses_groups(),
-                RuleOp::CheckDevTrustLevel(_) => ctx.uses_dev_trust_level(),
-                RuleOp::CheckIsBanned => ctx.uses_is_banned(),
-                _ => { }
-            }
-        }
-        ctx.count()
     }
 
     pub fn verify(&self, id: RobloxUserID) -> Result<HashMap<&str, RuleResult>> {

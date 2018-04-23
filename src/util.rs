@@ -156,9 +156,6 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
     pub fn retain(&self, mut f: impl FnMut(&K, &V) -> bool) {
         self.data.write().retain(|k, v| f(k, v));
     }
-    pub fn clear_cache(&self) {
-        *self.data.write() = HashMap::new();
-    }
 }
 
 // Command IDs

@@ -5,7 +5,6 @@ use regex::Regex;
 use roblox::*;
 use serenity;
 use std::borrow::Cow;
-use std::cmp::max;
 use std::time::SystemTime;
 use util;
 
@@ -361,10 +360,8 @@ pub const COMMANDS: &[Command] = &[
                         ctx.core.verify_channel().verify_instructions()?);
 
             let guild_id = msg.guild_id()?;
-            let cooldown = max(
-                ctx.core.config().get(None, ConfigKeys::MinimumUpdateCooldownSeconds)?,
-                ctx.core.config().get(Some(guild_id), ConfigKeys::UpdateCooldownSeconds)?,
-            );
+            let cooldown =
+                ctx.core.config().get(Some(guild_id), ConfigKeys::UpdateCooldownSeconds)?;
             let status = ctx.core.roles().update_user_with_cooldown(
                 guild_id, msg.author.id, cooldown, true, false,
             )?;
