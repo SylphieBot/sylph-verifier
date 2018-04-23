@@ -58,17 +58,17 @@ impl CoreRef {
         CoreRefActiveGuard(self)
     }
 
-    pub fn is_alive(&self) -> bool {
+    fn is_alive(&self) -> bool {
         if let Some(core) = self.0.read().as_ref() {
             core.status.load(Ordering::Relaxed) == STATUS_RUNNING
         } else {
             false
         }
     }
-    pub fn get_core(&self) -> Option<VerifierCore> {
+    fn get_core(&self) -> Option<VerifierCore> {
         self.0.read().as_ref().map(|x| VerifierCore(x.clone()))
     }
-    pub fn run_command(&self, command: &Command, ctx: &dyn CommandContextData) {
+    fn run_command(&self, command: &Command, ctx: &dyn CommandContextData) {
         if let Some(core) = self.get_core() {
             command.run(ctx, &core);
         } else  {

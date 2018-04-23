@@ -15,7 +15,7 @@ extern "C" {
                             compressed_size: c_int, max_decompressed_size: c_int) -> c_int;
 }
 
-pub fn compress(data: &[u8]) -> Result<Vec<u8>> {
+crate fn compress(data: &[u8]) -> Result<Vec<u8>> {
     let c_int_max = c_int::max_value() as usize;
     ensure!(data.len() <= c_int_max);
     let bound = unsafe { LZ4_compressBound(data.len() as c_int) };
@@ -32,7 +32,7 @@ pub fn compress(data: &[u8]) -> Result<Vec<u8>> {
     }
 }
 
-pub fn decompress(data: &[u8], decompressed_len: usize) -> Result<Vec<u8>> {
+crate fn decompress(data: &[u8], decompressed_len: usize) -> Result<Vec<u8>> {
     let c_int_max = c_int::max_value() as usize;
     ensure!(data.len()       <= c_int_max);
     ensure!(decompressed_len <= c_int_max);

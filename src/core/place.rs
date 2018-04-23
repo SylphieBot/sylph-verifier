@@ -11,9 +11,9 @@ use std::path::PathBuf;
 struct PlaceManagerState {
     place_target: PathBuf, current_hash: [u8; 32],
 }
-pub struct PlaceManager(Mutex<PlaceManagerState>);
+crate struct PlaceManager(Mutex<PlaceManagerState>);
 impl PlaceManager {
-    pub fn new(place_target: PathBuf) -> Result<PlaceManager> {
+    crate fn new(place_target: PathBuf) -> Result<PlaceManager> {
         let current_hash = if place_target.exists() {
             let mut handle = File::open(&place_target)?;
             let mut vec = Vec::new();
@@ -56,7 +56,7 @@ impl PlaceManager {
         }
         Ok(())
     }
-    pub fn update_place(&self, core: &VerifierCore) -> Result<()> {
+    crate fn update_place(&self, core: &VerifierCore) -> Result<()> {
         let place_data = create_place_file(None, &self.place_config(core)?)?;
         self.check_write_place(&place_data)?;
         Ok(())

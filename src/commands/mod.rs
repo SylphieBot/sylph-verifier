@@ -43,7 +43,7 @@ macro_rules! discord_permissions {
     ($($variant:ident => $permission:ident,)*) => {
         enum_set_type! {
             #[allow(dead_code)]
-            pub(self) enum DiscordPermission {
+            enum DiscordPermission {
                 $($variant,)*
             }
         }
@@ -103,7 +103,7 @@ pub struct Command {
     hidden: bool, command_fn: Option<CommandFn>,
 }
 impl Command {
-    pub(self) const fn new(name: &'static str) -> Command {
+    const fn new(name: &'static str) -> Command {
         Command {
             name, help_args: None, help_desc: None,
             required_privilege: PrivilegeLevel::NormalUser,
@@ -114,42 +114,42 @@ impl Command {
             no_threading: false, hidden: false, command_fn: None,
         }
     }
-    pub(self) const fn help(self, args: Option<&'static str>, desc: &'static str) -> Command {
+    const fn help(self, args: Option<&'static str>, desc: &'static str) -> Command {
         Command {
             help_args: args, help_desc: Some(desc),
             ..self
         }
     }
 
-    pub(self) const fn required_privilege(self, privilege: PrivilegeLevel) -> Command {
+    const fn required_privilege(self, privilege: PrivilegeLevel) -> Command {
         Command { required_privilege: privilege, ..self }
     }
-    pub(self) const fn allowed_contexts(self, contexts: EnumSet<CommandTarget>) -> Command {
+    const fn allowed_contexts(self, contexts: EnumSet<CommandTarget>) -> Command {
         Command { allowed_contexts: contexts, ..self }
     }
-    pub(self) const fn hidden(self) -> Command {
+    const fn hidden(self) -> Command {
         Command { hidden: true, ..self }
     }
-    pub(self) const fn terminal_only(self) -> Command {
+    const fn terminal_only(self) -> Command {
         Command {
             allowed_contexts: enum_set!(CommandTarget::Terminal),
             required_privilege: PrivilegeLevel::Terminal,
             ..self
         }
     }
-    pub(self) const fn required_permissions(
+    const fn required_permissions(
         self, discord_permissions: EnumSet<DiscordPermission>
     ) -> Command {
         Command { discord_permissions, ..self }
     }
-    pub(self) const fn no_threading(self) -> Command {
+    const fn no_threading(self) -> Command {
         Command { no_threading: true, ..self }
     }
 
-    pub(self) const fn exec(self, f: fn(&CommandContext) -> Result<()>) -> Command {
+    const fn exec(self, f: fn(&CommandContext) -> Result<()>) -> Command {
         Command { command_fn: Some(CommandFn::Normal(f)), ..self }
     }
-    pub(self) const fn exec_discord(
+    const fn exec_discord(
         self, f: fn(&CommandContext, &Context, &Message) -> Result<()>
     ) -> Command {
         Command { command_fn: Some(CommandFn::Discord(f)), ..self }
@@ -230,9 +230,9 @@ impl <'a> Args<'a> {
 }
 
 struct CommandContext<'a> {
-    pub core: &'a VerifierCore,
-    pub privilege_level: PrivilegeLevel,
-    pub command_target: CommandTarget,
+    core: &'a VerifierCore,
+    privilege_level: PrivilegeLevel,
+    command_target: CommandTarget,
     command: &'a Command,
     data: &'a dyn CommandContextData,
     args: Args<'a>,
@@ -246,13 +246,13 @@ impl <'a> CommandContext<'a> {
         }
     }
 
-    pub fn prefix(&self) -> &str {
+    fn prefix(&self) -> &str {
         self.data.prefix()
     }
-    pub fn respond(&self, message: impl AsRef<str>) -> Result<()> {
+    fn respond(&self, message: impl AsRef<str>) -> Result<()> {
         self.data.respond(message.as_ref().trim())
     }
-    pub fn discord_context(&self) -> Option<(&Context, &Message)> {
+    fn discord_context(&self) -> Option<(&Context, &Message)> {
         self.data.discord_context()
     }
 
@@ -299,7 +299,7 @@ impl <'a> CommandContext<'a> {
         }
     }
 
-    pub fn get_guild(&self) -> Result<Option<GuildId>> {
+    fn get_guild(&self) -> Result<Option<GuildId>> {
         match self.data.discord_context() {
             Some((_, message)) =>
                 match message.channel()? {
@@ -309,7 +309,7 @@ impl <'a> CommandContext<'a> {
             None => Ok(None),
         }
     }
-    pub fn user_guild_permissions(&self) -> Result<Permissions> {
+    fn user_guild_permissions(&self) -> Result<Permissions> {
         match self.data.discord_context() {
             Some((_, message)) =>
                 match message.channel()? {
@@ -321,7 +321,7 @@ impl <'a> CommandContext<'a> {
             None => bail!("This command can only be used on Discord."),
         }
     }
-    pub fn has_discord_permissions(&self, perms: EnumSet<DiscordPermission>) -> bool {
+    fn has_discord_permissions(&self, perms: EnumSet<DiscordPermission>) -> bool {
         if perms.is_empty() {
             return true
         }
@@ -337,10 +337,10 @@ impl <'a> CommandContext<'a> {
                 self.command.help_args.map_or("".to_owned(), |x| format!(" {}", x)))
     }
 
-    pub fn argc(&self) -> usize {
+    fn argc(&self) -> usize {
         self.args.matches.len()
     }
-    pub fn arg_opt(&self, i: usize) -> Option<&str> {
+    fn arg_opt(&self, i: usize) -> Option<&str> {
         if i < self.argc() {
             let arg = self.args.matches[i];
             Some(&self.args.str[arg.0..arg.1])
@@ -348,11 +348,11 @@ impl <'a> CommandContext<'a> {
             None
         }
     }
-    pub fn arg(&self, i: usize) -> Result<&str> {
+    fn arg(&self, i: usize) -> Result<&str> {
         self.arg_opt(i).to_cmd_err(|| self.not_enough_arguments())
     }
 
-    pub fn rest_opt(&self, i: usize) -> Option<&str> {
+    fn rest_opt(&self, i: usize) -> Option<&str> {
         if i < self.argc() {
             Some(self.args.str[self.args.matches[i].0..].trim())
         } else if i == self.argc() {
@@ -361,7 +361,7 @@ impl <'a> CommandContext<'a> {
             None
         }
     }
-    pub fn rest(&self, i: usize) -> Result<&str> {
+    fn rest(&self, i: usize) -> Result<&str> {
         self.rest_opt(i).to_cmd_err(|| self.not_enough_arguments())
     }
 }

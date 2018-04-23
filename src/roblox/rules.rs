@@ -191,7 +191,7 @@ enum RuleOp {
     CheckIsBanned,
 }
 impl RuleOp {
-    pub fn stack_change(&self) -> isize {
+    fn stack_change(&self) -> isize {
         match self {
             RuleOp::Read(_)                    =>  1,
             RuleOp::Output(_, _)               => -1,

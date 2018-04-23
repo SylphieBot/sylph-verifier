@@ -25,7 +25,7 @@ enum VerificationRulesStatus {
     Compiled(VerificationSet, HashMap<String, RoleId>),
 }
 impl VerificationRulesStatus {
-    pub fn is_compiled(&self) -> bool {
+    fn is_compiled(&self) -> bool {
         match self {
             VerificationRulesStatus::NotCompiled => false,
             _ => true,

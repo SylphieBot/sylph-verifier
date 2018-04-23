@@ -237,7 +237,7 @@ fn maybe_sprunge(ctx: &CommandContext, text: &str) -> Result<()> {
     }
 }
 
-pub const COMMANDS: &[Command] = &[
+crate const COMMANDS: &[Command] = &[
     Command::new("show_config")
         .help(None, "Shows the role configuration for the current channel.")
         .required_permissions(enum_set!(DiscordPermission::ManageRoles))

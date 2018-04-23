@@ -1,8 +1,9 @@
 #![warn(unused_extern_crates)]
 #![recursion_limit="128"]
-#![feature(nll, box_patterns, match_default_bindings, never_type, integer_atomics, fnbox,
-           universal_impl_trait, conservative_impl_trait, dyn_trait, const_fn, try_trait)]
+#![feature(rust_2018_preview)]
+#![feature(box_patterns, never_type, integer_atomics, fnbox, const_fn, try_trait)]
 #![deny(unused_must_use)]
+#![warn(rust_2018_idioms, edition_2018, future_incompatible)]
 
 // TODO: Clean up general program structure
 // TODO: Clean up program thread usage
@@ -41,16 +42,16 @@ extern crate uuid;
 #[macro_use] extern crate log;
 #[macro_use] extern crate serde_derive;
 
-#[macro_use] mod errors;
+#[macro_use] pub mod errors;
 
-mod commands;
-mod core;
-mod database;
-mod error_report;
-mod logger;
-mod roblox;
-mod startup;
-mod util;
+pub mod commands;
+pub mod core;
+pub mod database;
+pub mod error_report;
+pub mod logger;
+pub mod roblox;
+pub mod startup;
+pub mod util;
 
 fn main() {
     println!("Sylph-Verifier v{} by LymeeFairy", env!("CARGO_PKG_VERSION"));

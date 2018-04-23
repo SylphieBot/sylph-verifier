@@ -38,7 +38,7 @@ struct RobloxGroupLookup {
     #[serde(rename = "Rank")] rank: u32,
 }
 
-pub fn web_profile_exists(id: RobloxUserID) -> Result<bool> {
+crate fn web_profile_exists(id: RobloxUserID) -> Result<bool> {
     let uri = format!("https://www.roblox.com/users/{}/profile", id.0);
     let response = reqwest::get(&uri)?;
     let response = if response.status() != StatusCode::NotFound {
@@ -49,7 +49,7 @@ pub fn web_profile_exists(id: RobloxUserID) -> Result<bool> {
     Ok(response.url().as_str() == "https://www.roblox.com/request-error?code=404")
 }
 
-pub fn for_username(name: &str) -> Result<Option<RobloxUserID>> {
+crate fn for_username(name: &str) -> Result<Option<RobloxUserID>> {
     let uri = format!("https://api.roblox.com/users/get-by-username?username={}",
                       percent_encode(name.as_bytes(), QUERY_ENCODE_SET));
     let json = reqwest::get(&uri)?.error_for_status()?.text()?;
@@ -57,14 +57,14 @@ pub fn for_username(name: &str) -> Result<Option<RobloxUserID>> {
     Ok(info.id.map(RobloxUserID))
 }
 
-pub fn lookup_username(id: RobloxUserID) -> Result<Option<String>> {
+crate fn lookup_username(id: RobloxUserID) -> Result<Option<String>> {
     let uri = format!("https://api.roblox.com/users/{}", id.0);
     let json = reqwest::get(&uri)?.error_for_status()?.text()?;
     let info = serde_json::from_str::<RobloxIDLookup>(&json)?;
     Ok(info.name)
 }
 
-pub fn get_dev_trust_level(name: &str) -> Result<Option<u32>> {
+crate fn get_dev_trust_level(name: &str) -> Result<Option<u32>> {
     let uri = format!("https://devforum.roblox.com/users/{}.json",
                       percent_encode(name.as_bytes(), QUERY_ENCODE_SET));
     let mut request = reqwest::get(&uri)?;
@@ -76,27 +76,27 @@ pub fn get_dev_trust_level(name: &str) -> Result<Option<u32>> {
     }
 }
 
-pub fn owns_asset(id: RobloxUserID, asset: u64) -> Result<bool> {
+crate fn owns_asset(id: RobloxUserID, asset: u64) -> Result<bool> {
     let uri = format!("https://api.roblox.com/Ownership/HasAsset?userId={}&assetId={}",
                       id.0, asset);
     let text = reqwest::get(&uri)?.error_for_status()?.text()?;
     Ok(text == "true")
 }
 
-pub fn get_roblox_badges(id: RobloxUserID) -> Result<HashSet<String>> {
+crate fn get_roblox_badges(id: RobloxUserID) -> Result<HashSet<String>> {
     let uri = format!("https://www.roblox.com/badges/roblox?userId={}", id.0);
     let json = reqwest::get(&uri)?.error_for_status()?.text()?;
     let badges = serde_json::from_str::<RobloxBadgesLookup>(&json)?;
     Ok(badges.badges.into_iter().map(|x| x.name).collect())
 }
 
-pub fn has_player_badge(id: RobloxUserID, asset: u64) -> Result<bool> {
+crate fn has_player_badge(id: RobloxUserID, asset: u64) -> Result<bool> {
     let uri = format!("https://assetgame.roblox.com/Game/Badge/HasBadge.ashx?UserID={}&BadgeID={}",
                       id.0, asset);
     Ok(reqwest::get(&uri)?.error_for_status()?.text()? == "Success")
 }
 
-pub fn get_player_groups(id: RobloxUserID) -> Result<HashMap<u64, u32>> {
+crate fn get_player_groups(id: RobloxUserID) -> Result<HashMap<u64, u32>> {
     let uri = format!("https://api.roblox.com/users/{}/groups", id.0);
     let json = reqwest::get(&uri)?.error_for_status()?.text()?;
     let groups = serde_json::from_str::<Vec<RobloxGroupLookup>>(&json)?;

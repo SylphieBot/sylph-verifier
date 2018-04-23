@@ -37,14 +37,14 @@ impl CommandContextData for TerminalContext {
     }
 }
 
-pub struct Terminal {
+crate struct Terminal {
     core_ref: CoreRef, sender: Mutex<Option<LogSender>>,
 }
 impl Terminal {
     pub(in ::core) fn new(core_ref: CoreRef) -> Result<Terminal> {
         Ok(Terminal { core_ref, sender: Mutex::new(None) })
     }
-    pub fn open(&self) -> Result<()> {
+    crate fn open(&self) -> Result<()> {
         let mut reader = Reader::new("sylph-verifier")?;
         reader.set_prompt("sylph-verifier> ");
         reader.set_history_size(1000);
@@ -112,7 +112,7 @@ impl Terminal {
         logger::remove_log_sender();
         Ok(())
     }
-    pub fn interrupt(&self) {
+    crate fn interrupt(&self) {
         self.sender.lock().as_ref().map(|x| x.interrupt().ok());
     }
 }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-pub const COMMANDS: &[Command] = &[
+crate const COMMANDS: &[Command] = &[
     Command::new("shutdown")
         .help(Some("[--force]"), "Shuts down the bot.")
         .no_threading()

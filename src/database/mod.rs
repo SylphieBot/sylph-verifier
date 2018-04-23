@@ -46,7 +46,7 @@ pub trait ToSqlArgs {
 
 struct RowsWrapper<'a>(Rows<'a>);
 impl <'a> RowsWrapper<'a> {
-    pub fn get_all<T: FromSqlRow>(&mut self) -> Result<Vec<T>> {
+    fn get_all<T: FromSqlRow>(&mut self) -> Result<Vec<T>> {
         let mut vec = Vec::new();
         while let Some(r) = self.0.next() {
             vec.push(T::from_sql_row(Row(r?))?);
@@ -54,13 +54,13 @@ impl <'a> RowsWrapper<'a> {
         Ok(vec)
     }
 
-    pub fn get_opt<T: FromSqlRow>(&mut self) -> Result<Option<T>> {
+    fn get_opt<T: FromSqlRow>(&mut self) -> Result<Option<T>> {
         match self.0.next() {
             Some(r) => Ok(Some(T::from_sql_row(Row(r?))?)),
             None => Ok(None),
         }
     }
-    pub fn get<T: FromSqlRow>(&mut self) -> Result<T> {
+    fn get<T: FromSqlRow>(&mut self) -> Result<T> {
         let opt = self.get_opt()?;
         match opt {
             Some(res) => Ok(res),

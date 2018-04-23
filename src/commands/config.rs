@@ -216,7 +216,7 @@ fn set(ctx: &CommandContext, guild: Option<GuildId>) -> Result<()> {
     }
 }
 
-pub const COMMANDS: &[Command] = &[
+crate const COMMANDS: &[Command] = &[
     Command::new("set")
         .help(Some("<key> [new value]"), "Sets a configuration value for this guild.")
         .required_permissions(enum_set!(DiscordPermission::ManageGuild))
