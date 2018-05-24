@@ -94,7 +94,7 @@ mod impls {
     from_err! {
         std::fmt::Error, std::io::Error, std::num::ParseIntError, std::str::Utf8Error,
         std::string::FromUtf8Error, std::time::SystemTimeError, r2d2::Error, reqwest::Error,
-        rusqlite::Error, rusqlite::types::FromSqlError, serde_json::Error,
+        rusqlite::Error, rusqlite::types::FromSqlError, serde_json::Error, rand::Error,
     }
 }
 

@@ -4,7 +4,7 @@ use database::*;
 use errors::*;
 use hmac::{Hmac, Mac};
 use parking_lot::RwLock;
-use rand::{Rng, OsRng};
+use rand::{RngCore, OsRng};
 use roblox::*;
 use serenity::model::prelude::*;
 use sha2::Sha256;

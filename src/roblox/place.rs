@@ -28,7 +28,7 @@ impl <'a> RblxCompressed<'a> {
                 Ok(Cow::from(lz4::decompress(data, decompressed_len as usize)?))
             }
             RblxCompressed::Decompressed(ref vec) => {
-                Ok(Cow::from(vec.as_ref()))
+                Ok(Cow::from(vec))
             }
         }
     }
@@ -256,7 +256,7 @@ impl <'a> From<&'a str> for LuaConfigValue<'a> {
 }
 impl <'a> From<&'a String> for LuaConfigValue<'a> {
     fn from(s: &'a String) -> Self {
-        LuaConfigValue::String(Cow::from(s.as_ref()))
+        LuaConfigValue::String(Cow::from(s))
     }
 }
 impl <'a> From<String> for LuaConfigValue<'a> {
@@ -271,7 +271,7 @@ impl <'a> From<&'a [u8]> for LuaConfigValue<'a> {
 }
 impl <'a> From<&'a Vec<u8>> for LuaConfigValue<'a> {
     fn from(b: &'a Vec<u8>) -> Self {
-        LuaConfigValue::Binary(Cow::from(b.as_ref()))
+        LuaConfigValue::Binary(Cow::from(b))
     }
 }
 impl <'a> From<Vec<u8>> for LuaConfigValue<'a> {

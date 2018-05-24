@@ -1,9 +1,8 @@
 #![warn(unused_extern_crates)]
 #![recursion_limit="128"]
-#![feature(rust_2018_preview)]
+#![feature(nll, crate_visibility_modifier)]
 #![feature(box_patterns, never_type, integer_atomics, fnbox, const_fn, try_trait)]
 #![deny(unused_must_use)]
-#![warn(rust_2018_idioms, edition_2018, future_incompatible)]
 
 // TODO: Pass around IDs less to touch Serenity's cache less.
 // TODO: Add logging for verifications to a log channel.

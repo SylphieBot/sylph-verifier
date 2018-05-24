@@ -142,7 +142,7 @@ macro_rules! config_keys {
                             // This will only execute if transmute is an noop, so this is safe.
                             {
                                 let mut write_ptr = self.$name.write();
-                                let mut transmute: &mut Option<Option<T>> = unsafe {
+                                let transmute: &mut Option<Option<T>> = unsafe {
                                     mem::transmute(write_ptr.deref_mut())
                                 };
                                 *transmute = Some(Some(value));
