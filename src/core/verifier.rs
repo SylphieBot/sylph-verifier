@@ -11,7 +11,7 @@ use sha2::Sha256;
 use std::fmt::{Display, Formatter, Write, Result as FmtResult};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use util::MultiMutex;
+use util::MutexSet;
 
 const TOKEN_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const TOKEN_VERSION: u32 = 1;
@@ -213,7 +213,7 @@ pub enum VerifyResult {
 
 struct VerifierData {
     config: ConfigManager, database: Database, token_ctx: RwLock<TokenContext>,
-    discord_lock: MultiMutex<UserId>, roblox_lock: MultiMutex<RobloxUserID>,
+    discord_lock: MutexSet<UserId>, roblox_lock: MutexSet<RobloxUserID>,
 }
 #[derive(Clone)]
 pub struct Verifier(Arc<VerifierData>);
@@ -223,7 +223,7 @@ impl Verifier {
                                         config.get(None, ConfigKeys::TokenValiditySeconds)?)?;
         Ok(Verifier(Arc::new(VerifierData {
             config, database, token_ctx: RwLock::new(ctx),
-            discord_lock: MultiMutex::new(), roblox_lock: MultiMutex::new(),
+            discord_lock: MutexSet::new(), roblox_lock: MutexSet::new(),
         })))
     }
 

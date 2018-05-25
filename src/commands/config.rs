@@ -219,11 +219,11 @@ fn set(ctx: &CommandContext, guild: Option<GuildId>) -> Result<()> {
 crate const COMMANDS: &[Command] = &[
     Command::new("set")
         .help(Some("<key> [new value]"), "Sets a configuration value for this guild.")
-        .required_permissions(enum_set!(DiscordPermission::ManageGuild))
+        .required_permissions(enum_set!(BotPermission::ManageGuildSettings))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec(|ctx| set(ctx, Some(ctx.get_guild()?.unwrap()))),
     Command::new("set_global")
         .help(Some("<key> [new value]"), "Sets a global configuration value.")
-        .terminal_only()
+        .required_permissions(enum_set!(BotPermission::ManageGlobalSetings))
         .exec(|ctx| set(ctx, None)),
 ];

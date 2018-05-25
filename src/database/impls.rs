@@ -98,6 +98,11 @@ impl FromSql for SystemTime {
         Ok(util::time_from_i64(i64::from_sql(value)?))
     }
 }
+impl FromSql for Value {
+    fn from_sql(value: ValueRef) -> Result<Self> {
+        Ok(value.into())
+    }
+}
 
 macro_rules! to_rusqlite {
     ($($ty:ty),* $(,)*) => {
@@ -171,6 +176,11 @@ impl ToSql for RobloxUserID {
 impl ToSql for SystemTime {
     fn to_sql(&self) -> Result<ToSqlOutput> {
         Ok(Value::Integer(util::time_to_i64(*self)).into())
+    }
+}
+impl ToSql for Value {
+    fn to_sql(&self) -> Result<ToSqlOutput> {
+        Ok(self.into())
     }
 }
 

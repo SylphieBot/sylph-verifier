@@ -240,7 +240,7 @@ fn maybe_sprunge(ctx: &CommandContext, text: &str) -> Result<()> {
 crate const COMMANDS: &[Command] = &[
     Command::new("show_config")
         .help(None, "Shows the role configuration for the current channel.")
-        .required_permissions(enum_set!(DiscordPermission::ManageRoles))
+        .required_permissions(enum_set!(BotPermission::ManageRoles))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg| {
             let guild_id = msg.guild_id()?;
@@ -283,7 +283,7 @@ crate const COMMANDS: &[Command] = &[
     Command::new("set_role")
         .help(Some("<rule name> [discord role name]"),
               "Sets the Discord role the bot will set when a rule is matched.")
-        .required_permissions(enum_set!(DiscordPermission::ManageRoles))
+        .required_permissions(enum_set!(BotPermission::ManageRoles))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg| {
             let rule_name = ctx.arg(0)?;
@@ -292,7 +292,7 @@ crate const COMMANDS: &[Command] = &[
             let my_id = serenity::CACHE.read().user.id;
             if !role_name.is_empty() {
                 let role_id = find_role(guild_id, role_name)?;
-                if ctx.privilege_level < PrivilegeLevel::BotOwner &&
+                if !ctx.has_permissions(BotPermission::BypassHierarchy.into()) &&
                    !util::can_member_access_role(guild_id, msg.author.id, role_id)? {
                     cmd_error!("You do not have permission to modify that role.")
                 }
@@ -308,7 +308,7 @@ crate const COMMANDS: &[Command] = &[
     Command::new("set_custom_rule")
         .help(Some("<rule name> [rule definition]"),
               "Defines a custom rule for setting roles.")
-        .required_permissions(enum_set!(DiscordPermission::ManageRoles))
+        .required_permissions(enum_set!(BotPermission::ManageRoles))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg| {
             let rule_name = ctx.arg(0)?;
@@ -323,7 +323,7 @@ crate const COMMANDS: &[Command] = &[
         }),
     Command::new("test_verify")
         .help(Some("<roblox username>"), "Tests the results of your role configuration.")
-        .required_permissions(enum_set!(DiscordPermission::ManageRoles))
+        .required_permissions(enum_set!(BotPermission::ManageRoles))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg| {
             let roblox_username = ctx.arg(0)?;
@@ -371,6 +371,7 @@ crate const COMMANDS: &[Command] = &[
     Command::new("whois")
         .help(Some("<discord mention, user id, or roblox username>"),
               "Retrieves the Roblox account a Discord account is verified with or vice versa.")
+        .required_permissions(enum_set!(BotPermission::Whois))
         .exec(do_whois),
     Command::new("verify")
         .help(Some("<roblox username> <verification code>"),
@@ -380,8 +381,7 @@ crate const COMMANDS: &[Command] = &[
     Command::new("set_verification_channel")
         .help(None, "Makes the current channel a verification channel.")
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
-        .required_permissions(enum_set!(DiscordPermission::ManageGuild |
-                                        DiscordPermission::ManageMessages))
+        .required_permissions(enum_set!(BotPermission::ManageGuildSettings))
         .exec_discord(|ctx, _, msg| {
             let guild_id = msg.guild_id()?;
             if let Some("confirm") = ctx.arg_opt(0) {
@@ -406,8 +406,7 @@ crate const COMMANDS: &[Command] = &[
     Command::new("remove_verification_channel")
         .help(None, "Unsets the server's current verification channel, if one exists.")
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
-        .required_permissions(enum_set!(DiscordPermission::ManageGuild |
-                                        DiscordPermission::ManageMessages))
+        .required_permissions(enum_set!(BotPermission::ManageGuildSettings))
         .exec_discord(|ctx, _, msg| {
             let guild_id = msg.guild_id()?;
             ctx.core.verify_channel().remove(guild_id)?;
@@ -416,7 +415,7 @@ crate const COMMANDS: &[Command] = &[
     Command::new("explain")
         .help(Some("[rule to explain]"),
               "Explains the compilation of your ruleset or a role. You probably don't need this.")
-        .required_permissions(enum_set!(DiscordPermission::ManageRoles))
+        .required_permissions(enum_set!(BotPermission::ManageRoles))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg| {
             let rule = ctx.rest(0)?;

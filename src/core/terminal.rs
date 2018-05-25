@@ -1,5 +1,6 @@
 use commands::*;
-use core::CoreRef;
+use core::{CoreRef, BotPermission};
+use enumset::*;
 use error_report;
 use errors::*;
 use linefeed::*;
@@ -16,9 +17,10 @@ struct TerminalContext {
     line: String, command_no: usize,
 }
 impl CommandContextData for TerminalContext {
-    fn privilege_level(&self) -> PrivilegeLevel {
-        PrivilegeLevel::Terminal
+    fn permissions(&self) -> EnumSet<BotPermission> {
+        EnumSet::all()
     }
+
     fn command_target(&self) -> CommandTarget {
         CommandTarget::Terminal
     }

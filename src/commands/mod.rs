@@ -27,87 +27,22 @@ impl CommandFn {
     }
 }
 
-#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Debug)]
-pub enum PrivilegeLevel {
-    NormalUser, GuildOwner, BotOwner, Terminal,
-}
-
 enum_set_type! {
     pub enum CommandTarget {
         Terminal, ServerMessage, PrivateMessage,
     }
 }
 
-// This is duplicated here so permission sets can be statically declared.
-macro_rules! discord_permissions {
-    ($($variant:ident => $permission:ident,)*) => {
-        enum_set_type! {
-            #[allow(dead_code)]
-            enum DiscordPermission {
-                $($variant,)*
-            }
-        }
-
-        impl DiscordPermission {
-            fn to_serenity_permission(self) -> Permissions {
-                match self {
-                    $(DiscordPermission::$variant => Permissions::$permission,)*
-                }
-            }
-        }
-
-        fn to_serenity_permissions(perms: EnumSet<DiscordPermission>) -> Permissions {
-            let mut serenity_perms = Permissions::empty();
-            for perm in perms {
-                serenity_perms |= perm.to_serenity_permission()
-            }
-            serenity_perms
-        }
-    }
-}
-discord_permissions! {
-    CreateInvite       => CREATE_INVITE,
-    KickMembers        => KICK_MEMBERS,
-    BanMembers         => BAN_MEMBERS,
-    Adminstrator       => ADMINISTRATOR,
-    ManageChannels     => MANAGE_CHANNELS,
-    ManageGuild        => MANAGE_GUILD,
-    AddReactions       => ADD_REACTIONS,
-    ViewAuditLog       => VIEW_AUDIT_LOG,
-    ReadMessages       => READ_MESSAGES,
-    SendMessages       => SEND_MESSAGES,
-    SendTTSMessages    => SEND_TTS_MESSAGES,
-    ManageMessages     => MANAGE_MESSAGES,
-    EmbedLinks         => EMBED_LINKS,
-    AttachFiles        => ATTACH_FILES,
-    ReadMessageHistory => READ_MESSAGE_HISTORY,
-    MentionEveryone    => MENTION_EVERYONE,
-    UseExternalEmojis  => USE_EXTERNAL_EMOJIS,
-    Connect            => CONNECT,
-    Speak              => SPEAK,
-    MuteMembers        => MUTE_MEMBERS,
-    DeafenMembers      => DEAFEN_MEMBERS,
-    MoveMembers        => MOVE_MEMBERS,
-    UseVAD             => USE_VAD,
-    ChangeNickname     => CHANGE_NICKNAME,
-    ManageNicknames    => MANAGE_NICKNAMES,
-    ManageRoles        => MANAGE_ROLES,
-    ManageWebhooks     => MANAGE_WEBHOOKS,
-    ManageEmojis       => MANAGE_EMOJIS,
-}
-
 pub struct Command {
     name: &'static str, help_args: Option<&'static str>, help_desc: Option<&'static str>,
-    required_privilege: PrivilegeLevel, allowed_contexts: EnumSet<CommandTarget>,
-    discord_permissions: EnumSet<DiscordPermission>, pub no_threading: bool,
-    hidden: bool, command_fn: Option<CommandFn>,
+    allowed_contexts: EnumSet<CommandTarget>, permissions: EnumSet<BotPermission>,
+    pub no_threading: bool, hidden: bool, command_fn: Option<CommandFn>,
 }
 impl Command {
     const fn new(name: &'static str) -> Command {
         Command {
             name, help_args: None, help_desc: None,
-            required_privilege: PrivilegeLevel::NormalUser,
-            discord_permissions: EnumSet::new(),
+            permissions: enum_set!(),
             allowed_contexts: enum_set!(CommandTarget::Terminal |
                                         CommandTarget::ServerMessage |
                                         CommandTarget::PrivateMessage),
@@ -121,26 +56,14 @@ impl Command {
         }
     }
 
-    const fn required_privilege(self, privilege: PrivilegeLevel) -> Command {
-        Command { required_privilege: privilege, ..self }
-    }
     const fn allowed_contexts(self, contexts: EnumSet<CommandTarget>) -> Command {
         Command { allowed_contexts: contexts, ..self }
     }
     const fn hidden(self) -> Command {
         Command { hidden: true, ..self }
     }
-    const fn terminal_only(self) -> Command {
-        Command {
-            allowed_contexts: enum_set!(CommandTarget::Terminal),
-            required_privilege: PrivilegeLevel::Terminal,
-            ..self
-        }
-    }
-    const fn required_permissions(
-        self, discord_permissions: EnumSet<DiscordPermission>
-    ) -> Command {
-        Command { discord_permissions, ..self }
+    const fn required_permissions(self, permissions: EnumSet<BotPermission>) -> Command {
+        Command { permissions, ..self }
     }
     const fn no_threading(self) -> Command {
         Command { no_threading: true, ..self }
@@ -160,8 +83,7 @@ impl Command {
 
         let ctx = CommandContext::new(core, ctx, args, self);
         ctx.catch_error(|| {
-            cmd_ensure!(ctx.privilege_level >= self.required_privilege &&
-                        ctx.has_discord_permissions(self.discord_permissions),
+            cmd_ensure!(ctx.has_permissions(self.permissions),
                         "You do not have the necessary permissions to use that command.");
             if !self.allowed_contexts.contains(ctx.command_target) {
                 match ctx.command_target {
@@ -231,7 +153,7 @@ impl <'a> Args<'a> {
 
 struct CommandContext<'a> {
     core: &'a VerifierCore,
-    privilege_level: PrivilegeLevel,
+    permissions: EnumSet<BotPermission>,
     command_target: CommandTarget,
     command: &'a Command,
     data: &'a dyn CommandContextData,
@@ -242,7 +164,7 @@ impl <'a> CommandContext<'a> {
            args: Args<'a>, command: &'a Command) -> CommandContext<'a> {
         CommandContext {
             core, data, args, command,
-            privilege_level: data.privilege_level(), command_target: data.command_target(),
+            permissions: data.permissions(), command_target: data.command_target(),
         }
     }
 
@@ -309,26 +231,8 @@ impl <'a> CommandContext<'a> {
             None => Ok(None),
         }
     }
-    fn user_guild_permissions(&self) -> Result<Permissions> {
-        match self.data.discord_context() {
-            Some((_, message)) =>
-                match message.channel()? {
-                    Channel::Guild(ch) =>
-                        Ok(ch.read().permissions_for(&message.author)?),
-                    Channel::Group(_) | Channel::Private(_) | Channel::Category(_) =>
-                        Ok(Permissions::empty()),
-                },
-            None => bail!("This command can only be used on Discord."),
-        }
-    }
-    fn has_discord_permissions(&self, perms: EnumSet<DiscordPermission>) -> bool {
-        if perms.is_empty() {
-            return true
-        }
-        let perms = to_serenity_permissions(perms);
-        self.privilege_level >= PrivilegeLevel::GuildOwner ||
-            self.user_guild_permissions().ok().map_or(false, |x|
-                x.contains(perms) || x.contains(Permissions::ADMINISTRATOR))
+    fn has_permissions(&self, perms: EnumSet<BotPermission>) -> bool {
+        self.permissions.is_superset(perms)
     }
 
     fn not_enough_arguments(&self) -> String {
@@ -367,7 +271,7 @@ impl <'a> CommandContext<'a> {
 }
 
 pub trait CommandContextData {
-    fn privilege_level(&self) -> PrivilegeLevel;
+    fn permissions(&self) -> EnumSet<BotPermission>;
     fn command_target(&self) -> CommandTarget;
 
     fn prefix(&self) -> &str;
@@ -389,9 +293,8 @@ static CORE_COMMANDS: &'static [Command] = &[
             writeln!(buffer, "Command list: ([optional parameter], <required parameter>)")?;
             for command in COMMANDS.command_list() {
                 if !command.hidden &&
-                   ctx.privilege_level >= command.required_privilege &&
                    command.allowed_contexts.contains(ctx.command_target) &&
-                   ctx.has_discord_permissions(command.discord_permissions) {
+                   ctx.has_permissions(command.permissions) {
                     writeln!(buffer, "• {}{}{}{}",
                              ctx.prefix(), command.name,
                              command.help_args.map_or("".to_owned(), |x| format!(" {}", x)),

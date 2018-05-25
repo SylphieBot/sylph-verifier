@@ -9,7 +9,7 @@ crate const COMMANDS: &[Command] = &[
     Command::new("shutdown")
         .help(Some("[--force]"), "Shuts down the bot.")
         .no_threading()
-        .terminal_only()
+        .required_permissions(enum_set!(BotPermission::ManageBot))
         .exec(|ctx| {
             match ctx.arg_opt(0) {
                 Some("--force") => { exit(1); }
@@ -21,7 +21,7 @@ crate const COMMANDS: &[Command] = &[
     // Configuration
     Command::new("rekey")
         .help(None, "Changes the shared key used by the verifier.")
-        .terminal_only()
+        .required_permissions(enum_set!(BotPermission::ManageVerification))
         .exec(|ctx| {
             ctx.core.verifier().rekey(true)?;
             ctx.core.refresh_place()?;
@@ -31,19 +31,19 @@ crate const COMMANDS: &[Command] = &[
     // Discord management
     Command::new("connect")
         .help(None, "Connects to Discord.")
-        .terminal_only()
+        .required_permissions(enum_set!(BotPermission::ManageBot))
         .exec(|ctx| {
             ctx.core.discord().connect()
         }),
     Command::new("disconnect")
         .help(None, "Disconnects from Discord.")
-        .terminal_only()
+        .required_permissions(enum_set!(BotPermission::ManageBot))
         .exec(|ctx| {
             ctx.core.discord().disconnect()
         }),
     Command::new("reconnect")
         .help(None, "Reconnects to Discord.")
-        .terminal_only()
+        .required_permissions(enum_set!(BotPermission::ManageBot))
         .exec(|ctx| {
             ctx.core.discord().reconnect()
         }),
@@ -52,15 +52,12 @@ crate const COMMANDS: &[Command] = &[
     Command::new("debug_cmd")
         .hidden()
         .help(Some("<command> [args]"), "")
-        .required_privilege(PrivilegeLevel::BotOwner)
+        .required_permissions(enum_set!(BotPermission::BotAdmin))
         .exec(|ctx| {
             match ctx.arg(0)? {
                 "test_error" => bail!("Error triggered by command."),
                 "test_panic" => panic!("Panic triggered by command."),
                 "test_deadlock" => {
-                    cmd_ensure!(ctx.command_target == CommandTarget::Terminal,
-                                "This command *will* crash the bot and can only be called from \
-                                 terminal.");
                     let mutex_a1 = Arc::new(Mutex::new(()));
                     let mutex_b1 = Arc::new(Mutex::new(()));
                     let mutex_a2 = mutex_a1.clone();
