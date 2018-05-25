@@ -122,7 +122,6 @@ impl Handler {
         }
 
         let core_ref = self.shared.core_ref.clone();
-        let bot_owner_id = self.shared.config.get(None, ConfigKeys::BotOwnerId)?.map(UserId);
         let is_in_command = self.shared.is_in_command.clone();
 
         let permissions = match guild_id {

@@ -204,7 +204,6 @@ config_keys! {
     // Discord settings
     CommandPrefix<String>("!".to_owned(), |_, core| core.refresh_place());
     DiscordToken<Option<String>>(None, |_, core| core.discord().reconnect());
-    BotOwnerId<Option<u64>>(None);
 
     // Role management settings
     SetNickname<bool>(true);
