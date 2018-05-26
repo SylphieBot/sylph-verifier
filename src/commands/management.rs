@@ -52,7 +52,7 @@ crate const COMMANDS: &[Command] = &[
     // Debugging commands
     Command::new("debug_cmd")
         .hidden()
-        .help(Some("<command> [args]"), "")
+        .help(Some("<command> [args]"), "Runs various debugging commands.")
         .required_permissions(enum_set!(BotPermission::BotAdmin))
         .exec(|ctx| {
             let production = ctx.core.config().get(None, ConfigKeys::ProductionMode)?;

@@ -303,22 +303,35 @@ mod verifier;
 
 static CORE_COMMANDS: &'static [Command] = &[
     Command::new("help")
-        .help(None, "Lists all available commands.")
+        .help(Some("<command>"),
+              "Lists all available commands, or information on a particular command..")
         .exec(|ctx| {
-            let mut buffer = String::new();
-            writeln!(buffer, "Command list: ([optional parameter], <required parameter>)")?;
-            for command in COMMANDS.command_list() {
-                if !command.hidden &&
-                   command.allowed_contexts.contains(ctx.command_target) &&
-                   ctx.has_permissions(command.permissions) {
-                    writeln!(buffer, "• {}{}{}{}",
-                             ctx.prefix(), command.name,
-                             command.help_args.map_or("".to_owned(), |x| format!(" {}", x)),
-                             command.help_desc.map_or("".to_owned(), |x| format!(" - {}", x)))?;
+            if let Some(command) = ctx.arg_opt(0) {
+                if let Some(command) = COMMANDS.get(command) {
+                    ctx.respond(format!(
+                        "{}{}{}{}",
+                        ctx.prefix(), command.name,
+                        command.help_args.map_or("".to_owned(), |x| format!(" {}", x)),
+                        command.help_desc.map_or("".to_owned(), |x| format!(" - {}", x))
+                    ))
+                } else {
+                    ctx.respond("No such command was found.")
                 }
+            } else {
+                let mut buffer = String::new();
+                writeln!(buffer, "Command list: ([optional parameter], <required parameter>)")?;
+                for command in COMMANDS.command_list() {
+                    if !command.hidden &&
+                       command.allowed_contexts.contains(ctx.command_target) &&
+                       ctx.has_permissions(command.permissions) {
+                        writeln!(buffer, "• {}{}{}",
+                                 ctx.prefix(), command.name,
+                                 command.help_args.map_or("".to_owned(), |x| format!(" {}", x)))?;
+                    }
+                }
+                writeln!(buffer, "For more information on a command, use `~help command`.")?;
+                ctx.respond(buffer)
             }
-            ctx.respond(&buffer)?;
-            Ok(())
         })
 ];
 lazy_static! {

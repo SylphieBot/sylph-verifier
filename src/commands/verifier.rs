@@ -205,14 +205,14 @@ fn display_history<T>(
      header_name: &str, to_string: impl Fn(T) -> String,
 ) -> Result<()> {
     let mut history = String::new();
-    write!(history, "History for {}:", header_name)?;
+    writeln!(history, "History for {}:", header_name)?;
     for entry in entries {
         let date: DateTime<Utc> = entry.last_updated.into();
-        write!(history, "\n• Account was {} with {} on {} UTC",
-               if entry.is_unverify { "unverified" } else { "verified" },
-               to_string(entry.id), date.format("%Y-%m-%d %H:%M:%S"))?;
+        writeln!(history, "• Account was {} with {} on {} UTC",
+                 if entry.is_unverify { "unverified" } else { "verified" },
+                 to_string(entry.id), date.format("%Y-%m-%d %H:%M:%S"))?;
     }
-    ctx.respond(&history)
+    ctx.respond(history)
 }
 fn do_whowas(ctx: &CommandContext) -> Result<()> {
     let target_name = ctx.arg(0)?;
