@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::str::FromStr;
 
-// TODO: Unify parsing of common types better.
+mod util;
 
 enum CommandFn {
     Normal(fn(&CommandContext) -> Result<()>),
@@ -231,6 +231,9 @@ impl <'a> CommandContext<'a> {
             None => Ok(None),
         }
     }
+    fn permissions(&self) -> EnumSet<BotPermission> {
+        self.permissions
+    }
     fn has_permissions(&self, perms: EnumSet<BotPermission>) -> bool {
         self.permissions.is_superset(perms)
     }
@@ -254,6 +257,18 @@ impl <'a> CommandContext<'a> {
     }
     fn arg(&self, i: usize) -> Result<&str> {
         self.arg_opt(i).to_cmd_err(|| self.not_enough_arguments())
+    }
+
+    fn arg_between_opt(&self, first: usize, last: usize) -> Option<&str> {
+        if first < self.argc() && last < self.argc() {
+            assert!(first <= last);
+            Some(&self.args.str[self.args.matches[first].0..self.args.matches[last].1])
+        } else {
+            None
+        }
+    }
+    fn arg_between(&self, first: usize, last: usize) -> Result<&str> {
+        self.arg_between_opt(first, last).to_cmd_err(|| self.not_enough_arguments())
     }
 
     fn rest_opt(&self, i: usize) -> Option<&str> {
@@ -283,6 +298,7 @@ pub trait CommandContextData {
 
 mod config;
 mod management;
+mod permissions;
 mod verifier;
 
 static CORE_COMMANDS: &'static [Command] = &[
@@ -307,7 +323,8 @@ static CORE_COMMANDS: &'static [Command] = &[
 ];
 lazy_static! {
     static ref COMMANDS: CommandList = CommandList::new(&[
-        CORE_COMMANDS, config::COMMANDS, management::COMMANDS, verifier::COMMANDS,
+        CORE_COMMANDS, config::COMMANDS, management::COMMANDS,
+        permissions::COMMANDS, verifier::COMMANDS,
     ]);
 }
 pub fn get_command(msg: &str) -> Option<&'static Command> {

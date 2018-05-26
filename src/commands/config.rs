@@ -52,7 +52,7 @@ macro_rules! config_values {
                 $(
                     stringify!($config_name) => {
                         cmd_ensure!(guild.is_none() || $allow_guild,
-                                    "This option cannot be set per-guild.");
+                                    "This option cannot be set per-server.");
                         match value {
                             Some(str) => {
                                 let from_str: fn(&str) -> Result<$tp> = $from_str;
@@ -213,7 +213,7 @@ fn set(ctx: &CommandContext, guild: Option<GuildId>) -> Result<()> {
 
 crate const COMMANDS: &[Command] = &[
     Command::new("set")
-        .help(Some("<key> [new value]"), "Sets a configuration value for this guild.")
+        .help(Some("<key> [new value]"), "Sets a configuration value for this server.")
         .required_permissions(enum_set!(BotPermission::ManageGuildSettings))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec(|ctx| set(ctx, Some(ctx.get_guild()?.unwrap()))),

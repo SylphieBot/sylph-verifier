@@ -20,7 +20,7 @@ mod verification_channel;
 mod verifier;
 
 pub use self::config::{ConfigKey, ConfigKeys};
-pub use self::permissions::BotPermission;
+pub use self::permissions::{BotPermission, Scope};
 pub use self::roles::{RoleManager, AssignedRole, ConfiguredRole, SetRolesStatus};
 pub use self::verification_channel::VerificationChannelManager;
 pub use self::verifier::{Verifier, VerifyResult, TokenStatus};

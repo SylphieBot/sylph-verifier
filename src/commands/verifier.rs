@@ -1,7 +1,7 @@
 use super::*;
+use super::util::*;
 
 use chrono::{DateTime, Utc};
-use regex::Regex;
 use roblox::*;
 use serenity;
 use std::borrow::Cow;
@@ -11,11 +11,6 @@ use util;
 // TODO: Check role existence.
 // TODO: Consider moving error messages back into roles.rs
 // TODO: Support force updating an user.
-
-lazy_static! {
-    static ref MENTION_REGEX: Regex = Regex::new("^<@!?([0-9]+)>$").unwrap();
-    static ref SNOWFLAKE_REGEX: Regex = Regex::new("^([0-9]+)$").unwrap();
-}
 
 fn get_discord_username(discord_id: UserId) -> String {
     match discord_id.find() {
@@ -149,34 +144,6 @@ fn check_configuration(ctx: &CommandContext, guild_id: GuildId) -> Result<()> {
     }
 }
 
-fn find_role(guild_id: GuildId, role_name: &str) -> Result<RoleId> {
-    let guild = guild_id.find()?;
-    let guild = guild.read();
-
-    if let Some(captures) = MENTION_REGEX.captures(role_name) {
-        let role_id_str = captures.get(1)?.as_str();
-        let role_id = RoleId(role_id_str.parse().to_cmd_err(|| "Role ID too large.")?);
-        cmd_ensure!(guild.roles.contains_key(&role_id),
-                    "That role does not exist in this server.");
-        Ok(role_id)
-    } else {
-        let mut found_role = None;
-        for role in guild.roles.values() {
-            if role.name.trim() == role_name {
-                cmd_ensure!(found_role.is_none(),
-                            "Two roles named '{}' found! Consider using `<@role id>` \
-                             to disambiguate.", role_name);
-                found_role = Some(role.id);
-            }
-        }
-        match found_role {
-            Some(role) => Ok(role),
-            None => cmd_error!("No role named '{}' found. Note that roles are case sensitive.",
-                               role_name),
-        }
-    }
-}
-
 fn whois_msg(
     ctx: &CommandContext, user: User, roblox_id: RobloxUserID, roblox_name: &str
 ) -> Result<()> {
@@ -216,12 +183,7 @@ fn whois_roblox(ctx: &CommandContext, roblox_name: &str) -> Result<()> {
 }
 fn do_whois(ctx: &CommandContext) -> Result<()> {
     let target_name = ctx.arg(0)?;
-    if let Some(captures) = MENTION_REGEX.captures(target_name) {
-        let user_id_str = captures.get(1)?.as_str();
-        let user_id = UserId(user_id_str.parse().to_cmd_err(|| "User ID too large.")?);
-        whois_discord(ctx, user_id)
-    } else if SNOWFLAKE_REGEX.is_match(target_name) {
-        let user_id = UserId(target_name.parse().to_cmd_err(|| "User ID too large.")?);
+    if let Some(user_id) = find_user(target_name)? {
         whois_discord(ctx, user_id)
     } else {
         whois_roblox(ctx, target_name)
