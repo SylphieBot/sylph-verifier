@@ -1,5 +1,6 @@
 use super::*;
 
+use roblox::*;
 use std::process::exit;
 use std::sync::Arc;
 use std::thread;
@@ -54,6 +55,13 @@ crate const COMMANDS: &[Command] = &[
         .help(Some("<command> [args]"), "")
         .required_permissions(enum_set!(BotPermission::BotAdmin))
         .exec(|ctx| {
+            let production = ctx.core.config().get(None, ConfigKeys::ProductionMode)?;
+            cmd_ensure!(!production,
+                        "Cannot use this command in production mode. If you really want to do \
+                         this, execute the following SQL statement on the database, then restart \
+                         the server:\n\
+                         `INSERT INTO global_config (key, value) \
+                          VALUES (\"ProductionMode\", false);`");
             match ctx.arg(0)? {
                 "test_error" => bail!("Error triggered by command."),
                 "test_panic" => panic!("Panic triggered by command."),
@@ -78,6 +86,12 @@ crate const COMMANDS: &[Command] = &[
                     ::std::thread::sleep(::std::time::Duration::from_secs(3));
                     ctx.respond("Sleep completed.")
                 }
+                "make_token" => {
+                    let username = ctx.arg(1)?;
+                    let roblox_id = RobloxUserID::for_username(username)?;
+                    ctx.respond(format!("Token for Roblox user {}: {}",
+                                        username, ctx.core.verifier().make_token(roblox_id)?))
+                },
                 _ => cmd_error!("Unknown debug command."),
             }
         })

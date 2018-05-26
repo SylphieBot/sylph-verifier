@@ -9,8 +9,7 @@ use std::time::SystemTime;
 use util;
 
 // TODO: Check role existence.
-// TODO: Consider moving error messages back into roles.rs
-// TODO: Support force updating an user.
+// TODO: Take care of massive code redundancy here.
 
 fn get_discord_username(discord_id: UserId) -> String {
     match discord_id.find() {
@@ -168,8 +167,7 @@ fn whois_discord(ctx: &CommandContext, discord_user_id: UserId) -> Result<()> {
     }
 }
 fn whois_roblox(ctx: &CommandContext, roblox_name: &str) -> Result<()> {
-    let roblox_user_id = RobloxUserID::for_username(roblox_name)
-        .to_cmd_err(|| format!("No such Roblox user '{}' exists.", roblox_name))?;
+    let roblox_user_id = RobloxUserID::for_username(roblox_name)?;
     let discord_user_id = ctx.core.verifier().get_verified_discord_user(roblox_user_id)?;
     if let Some(discord_user_id) = discord_user_id {
         let user = discord_user_id.get().map_err(Error::from).status_to_cmd(StatusCode::NotFound, ||
@@ -187,6 +185,73 @@ fn do_whois(ctx: &CommandContext) -> Result<()> {
         whois_discord(ctx, user_id)
     } else {
         whois_roblox(ctx, target_name)
+    }
+}
+
+fn format_discord_id(id: UserId) -> String {
+    match id.get() {
+        Ok(user) => user.tag(),
+        Err(_) => format!("*(non-existent Discord id #{})*", id.0),
+    }
+}
+fn format_roblox_id(id: RobloxUserID) -> String {
+    match id.lookup_username() {
+        Ok(username) => username,
+        Err(_) => format!("*(non-existent Roblox id #{})*", id.0),
+    }
+}
+fn display_history<T>(
+     ctx: &CommandContext, entries: Vec<HistoryEntry<T>>,
+     header_name: &str, to_string: impl Fn(T) -> String,
+) -> Result<()> {
+    let mut history = String::new();
+    write!(history, "History for {}:", header_name)?;
+    for entry in entries {
+        let date: DateTime<Utc> = entry.last_updated.into();
+        write!(history, "\n• Account was {} with {} on {} UTC",
+               if entry.is_unverify { "unverified" } else { "verified" },
+               to_string(entry.id), date.format("%Y-%m-%d %H:%M:%S"))?;
+    }
+    ctx.respond(&history)
+}
+fn do_whowas(ctx: &CommandContext) -> Result<()> {
+    let target_name = ctx.arg(0)?;
+    if let Some(user_id) = find_user(target_name)? {
+        display_history(ctx, ctx.core.verifier().get_discord_user_history(user_id, 10)?,
+                        &format!("Discord user {}", format_discord_id(user_id)), format_roblox_id)
+    } else {
+        let roblox_id = RobloxUserID::for_username(target_name)?;
+        display_history(ctx, ctx.core.verifier().get_roblox_user_history(roblox_id, 10)?,
+                        &format!("Roblox user {}", format_roblox_id(roblox_id)), format_discord_id)
+    }
+}
+
+fn force_unverify(
+    ctx: &CommandContext, discord_id: UserId, roblox_id: RobloxUserID,
+) -> Result<()> {
+    let user = discord_id.get().map_err(Error::from)
+        .status_to_cmd(StatusCode::NotFound, || "That Discord account does not exist.")?;
+    ctx.core.verifier().unverify(discord_id)?;
+    ctx.respond(format!("User {} has been unverified with {}.",
+                        user.tag(), roblox_id.lookup_username()?))
+}
+fn do_force_unverify(ctx: &CommandContext) -> Result<()> {
+    let target_name = ctx.arg(0)?;
+    if let Some(discord_id) = find_user(target_name)? {
+        let roblox_id = ctx.core.verifier().get_verified_roblox_user(discord_id)?;
+        if let Some(roblox_id) = roblox_id {
+            force_unverify(ctx, discord_id, roblox_id)
+        } else {
+            cmd_error!("User isn't verified.");
+        }
+    } else {
+        let roblox_id = RobloxUserID::for_username(target_name)?;
+        let discord_id = ctx.core.verifier().get_verified_discord_user(roblox_id)?;
+        if let Some(discord_id) = discord_id {
+            force_unverify(ctx, discord_id, roblox_id)
+        } else {
+            cmd_error!("No Discord user has verified as {}.", target_name);
+        }
     }
 }
 
@@ -335,11 +400,31 @@ crate const COMMANDS: &[Command] = &[
               "Retrieves the Roblox account a Discord account is verified with or vice versa.")
         .required_permissions(enum_set!(BotPermission::Whois))
         .exec(do_whois),
+    Command::new("whowas")
+        .help(Some("<discord mention, user id, or roblox username>"),
+              "Retrieves the verification history of a Roblox account or a Discord account.")
+        .required_permissions(enum_set!(BotPermission::Whowas))
+        .exec(do_whowas),
     Command::new("verify")
         .help(Some("<roblox username> <verification code>"),
               "Verifies a Roblox account to your Discord account.")
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(do_verify),
+    Command::new("unverify")
+        .help(None, "Unverifies your Roblox account from your Discord account.")
+        .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
+        .required_permissions(enum_set!(BotPermission::Unverify))
+        .exec_discord(|ctx, _, msg| {
+            let guild_id = msg.guild_id()?;
+            ctx.core.verifier().unverify(msg.author.id)?;
+            let status = ctx.core.roles().assign_roles(guild_id, msg.author.id, None)?;
+            ctx.respond(verify_status_str(ctx.prefix(), status))
+        }),
+    Command::new("force_unverify")
+        .help(None, "Unverifies your Roblox account from your Discord account.")
+        .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
+        .required_permissions(enum_set!(BotPermission::UnverifyOther))
+        .exec(do_force_unverify),
     Command::new("set_verification_channel")
         .help(None, "Makes the current channel a verification channel.")
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))

@@ -36,7 +36,7 @@ config_values! {
     manage_roles           => ManageRoles,
 
     // Command permissions
-    cmd_unverify_self      => UnverifySelf,
+    cmd_unverify           => Unverify,
     cmd_unverify_other     => UnverifyOther,
     cmd_whois              => Whois,
     cmd_whowas             => Whowas,
@@ -132,8 +132,8 @@ crate const COMMANDS: &[Command] = &[
               "Set permissions allowed to be set to the current server.")
         .required_permissions(enum_set!(BotPermission::BotAdmin))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
-        .exec(|ctx|
-            set_perms_for_scope(ctx, Scope::Guild(ctx.discord_context()?.1.guild_id()?), 0)
+        .exec_discord(|ctx, _, msg|
+            set_perms_for_scope(ctx, Scope::Guild(msg.guild_id()?), 0)
         ),
     Command::new("set_perms")
         .help(Some("<all_users|role <role id or name>|user <user id or mention>> \
@@ -141,8 +141,8 @@ crate const COMMANDS: &[Command] = &[
               "Set user permissions for this server.")
         .required_permissions(enum_set!(BotPermission::GuildAdmin))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
-        .exec(|ctx| set_perms(ctx, |scope, args| {
-            let guild_id = ctx.discord_context()?.1.guild_id()?;
+        .exec_discord(|ctx, _, msg| set_perms(ctx, |scope, args| {
+            let guild_id = msg.guild_id()?;
             match scope {
                 "all_users" => Ok(Scope::GuildAllUsers(guild_id)),
                 "role" => Ok(Scope::GuildRole(guild_id, find_role(guild_id, args)?)),

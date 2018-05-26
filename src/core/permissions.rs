@@ -48,7 +48,7 @@ enum_set_type! {
         BypassHierarchy, ManageGuildSettings, ManageRoles,
 
         // Command permissions
-        UnverifySelf, UnverifyOther, Whois, Whowas,
+        Unverify, UnverifyOther, Whois, Whowas,
 
         // Logging permissions
         LogAllVerifications,
@@ -62,7 +62,7 @@ const ALWAYS_GLOBAL_GUILD: EnumSet<BotPermission> =
 const DEFAULT_GLOBAL_ALL_GUILDS: EnumSet<BotPermission> =
     enum_set!(LogAllVerifications);
 const DEFAULT_GLOBAL_ALL_USERS: EnumSet<BotPermission> =
-    enum_set!(UnverifySelf | Whois | Whowas);
+    enum_set!(Unverify | Whois | Whowas);
 const GUILD_ONLY: EnumSet<BotPermission> =
     enum_set!(LogAllVerifications);
 

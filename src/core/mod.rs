@@ -23,7 +23,7 @@ pub use self::config::{ConfigKey, ConfigKeys};
 pub use self::permissions::{BotPermission, Scope};
 pub use self::roles::{RoleManager, AssignedRole, ConfiguredRole, SetRolesStatus};
 pub use self::verification_channel::VerificationChannelManager;
-pub use self::verifier::{Verifier, VerifyResult, TokenStatus};
+pub use self::verifier::{Verifier, VerifyResult, TokenStatus, HistoryEntry};
 
 use self::config::ConfigManager;
 use self::discord::DiscordManager;

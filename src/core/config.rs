@@ -242,6 +242,9 @@ config_keys! {
     AllowReverifyDiscord<bool>(false);
     AllowReverifyRoblox<bool>(false);
     ReverificationCooldownSeconds<u64>(60 * 60 * 24);
+
+    // Internal settings for debugging. These aren't configurable via commands.
+    ProductionMode<bool>(true);
 }
 
 struct ConfigManagerData {

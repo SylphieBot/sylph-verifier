@@ -1,9 +1,16 @@
 BEGIN EXCLUSIVE;
   -- Stores information about a Discord user's verification history.
-  CREATE TABLE discord_user_history (
-    discord_user_id BIGINT NOT NULL, roblox_user_id BIGINT NOT NULL, last_updated TIMESTAMP NOT NULL,
-    FOREIGN KEY (roblox_user_id) REFERENCES roblox_user_info (roblox_user_id)
+  CREATE TABLE user_history (
+    discord_user_id BIGINT NOT NULL, roblox_user_id BIGINT NOT NULL, is_unverify BOOL NOT NULL,
+    last_updated TIMESTAMP NOT NULL
   );
+  CREATE INDEX user_history_discord_idx ON user_history (discord_user_id);
+  CREATE INDEX user_history_roblox_idx ON user_history (roblox_user_id);
+
+  -- Populate user history with current user verifications.
+  INSERT INTO user_history (discord_user_id, roblox_user_id, is_unverify, last_updated)
+  SELECT discord_user_id, roblox_user_id, 0, last_updated FROM discord_user_info
+  WHERE discord_user_id NOT NULL AND roblox_user_id NOT NULL;
 
   -- Stores information about granted permissions.
   CREATE TABLE permissions (

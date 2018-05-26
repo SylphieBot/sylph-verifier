@@ -96,14 +96,17 @@ impl TokenParameters {
         Ok((unix_time / self.time_increment as u64) as i64)
     }
 
-    fn make_token(&self, user_id: u64, epoch: i64) -> Result<Token> {
-        Ok(self.sha256_token(&format!("{}|{}|{}", TOKEN_VERSION, user_id, epoch)))
+    fn make_token(&self, user_id: u64, epoch: i64) -> Token {
+        self.sha256_token(&format!("{}|{}|{}", TOKEN_VERSION, user_id, epoch))
     }
 
+    fn make_current_token(&self, user: RobloxUserID) -> Result<Token> {
+        Ok(self.make_token(user.0, self.current_epoch()?))
+    }
     fn check_token(&self, user: RobloxUserID, token: &Token) -> Result<Option<i64>> {
         let epoch = self.current_epoch()?;
         for i in &[1, 0, -1] {
-            if token == &self.make_token(user.0, epoch + i)? {
+            if token == &self.make_token(user.0, epoch + i) {
                 return Ok(Some(epoch + i))
             }
         }
@@ -211,6 +214,16 @@ pub enum VerifyResult {
     ReverifyOnCooldown { cooldown: u64, cooldown_ends: SystemTime }
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct HistoryEntry<T> {
+    pub id: T, pub is_unverify: bool, pub last_updated: SystemTime,
+}
+impl <T> HistoryEntry<T> {
+    fn new(id: T, is_unverify: bool, last_updated: SystemTime) -> HistoryEntry<T> {
+        HistoryEntry { id, is_unverify, last_updated }
+    }
+}
+
 struct VerifierData {
     config: ConfigManager, database: Database, token_ctx: RwLock<TokenContext>,
     discord_lock: MutexSet<UserId>, roblox_lock: MutexSet<RobloxUserID>,
@@ -227,6 +240,16 @@ impl Verifier {
         })))
     }
 
+    pub fn make_token(&self, user: RobloxUserID) -> Result<String> {
+        let production = self.0.config.get(None, ConfigKeys::ProductionMode)?;
+        cmd_ensure!(!production, "Cannot use this command in production mode.");
+        warn!("get_token called for roblox user {} (id #{})! This can be used to fake \
+               verifications for that user! If you do not know how this occurred, your bot \
+               has been compromised.", user.lookup_username()?, user.0);
+        let token_ctx = self.0.token_ctx.read();
+        Ok(token_ctx.current.make_current_token(user)?.to_string())
+    }
+
     pub fn rekey(&self, force: bool) -> Result<bool> {
         let mut lock = self.0.token_ctx.write();
         let cur_id = lock.current.id;
@@ -241,16 +264,37 @@ impl Verifier {
     }
 
     pub fn get_verified_roblox_user(&self, user: UserId) -> Result<Option<RobloxUserID>> {
-        let conn = self.0.database.connect()?;
-        Ok(conn.query(
+        Ok(self.0.database.connect()?.query(
             "SELECT roblox_user_id FROM discord_user_info WHERE discord_user_id = ?1", user
         ).get_opt::<Option<RobloxUserID>>()?.and_then(|x| x))
     }
     pub fn get_verified_discord_user(&self, user: RobloxUserID) -> Result<Option<UserId>> {
-        let conn = self.0.database.connect()?;
-        conn.query(
+        self.0.database.connect()?.query(
             "SELECT discord_user_id FROM discord_user_info WHERE roblox_user_id = ?1", user
         ).get_opt()
+    }
+
+    pub fn get_discord_user_history(
+        &self, user: UserId, limit: u64,
+    ) -> Result<Vec<HistoryEntry<RobloxUserID>>> {
+        Ok(self.0.database.connect()?.query(
+            "SELECT roblox_user_id, is_unverify, last_updated FROM user_history \
+             WHERE discord_user_id = ?1 \
+             ORDER BY rowid DESC LIMIT ?2", (user, limit)
+        ).get_all::<(RobloxUserID, bool, SystemTime)>()?.iter().rev()
+            .map(|&(id, is_unverify, time)| HistoryEntry::new(id, is_unverify, time))
+            .collect())
+    }
+    pub fn get_roblox_user_history(
+        &self, user: RobloxUserID, limit: u64,
+    ) -> Result<Vec<HistoryEntry<UserId>>> {
+        Ok(self.0.database.connect()?.query(
+            "SELECT discord_user_id, is_unverify, last_updated FROM user_history \
+             WHERE roblox_user_id = ?1 \
+             ORDER BY rowid DESC LIMIT ?2", (user, limit)
+        ).get_all::<(UserId, bool, SystemTime)>()?.iter().rev()
+            .map(|&(id, is_unverify, time)| HistoryEntry::new(id, is_unverify, time))
+            .collect())
     }
 
     pub fn try_verify(
@@ -363,12 +407,50 @@ impl Verifier {
             }
         }
 
-        conn.execute(
-            "REPLACE INTO discord_user_info (discord_user_id, roblox_user_id, last_updated) \
-             VALUES (?1, ?2, ?3)", (discord_id, roblox_id, SystemTime::now()),
-        )?;
+        conn.transaction(|| {
+            conn.execute(
+                "REPLACE INTO discord_user_info (discord_user_id, roblox_user_id, last_updated) \
+                 VALUES (?1, ?2, ?3)", (discord_id, roblox_id, SystemTime::now()),
+            )?;
+            conn.execute(
+                "INSERT INTO user_history (\
+                     discord_user_id, roblox_user_id, is_unverify, last_updated\
+                 ) VALUES (?1, ?2, ?3, ?4)", (discord_id, roblox_id, false, SystemTime::now()),
+            )?;
+            Ok(())
+        })?;
 
         Ok(VerifyResult::VerificationOk)
+    }
+    pub fn unverify(&self, discord_id: UserId) -> Result<()> {
+        let discord_lock = self.0.discord_lock.lock(discord_id);
+        cmd_ensure!(discord_lock.is_some(),
+                    "Please wait for your last verification attempt to finish.");
+
+        if let Some(roblox_id) = self.get_verified_roblox_user(discord_id)? {
+            let roblox_lock = self.0.roblox_lock.lock(roblox_id);
+            cmd_ensure!(roblox_lock.is_some(),
+                        "Someone else is currently trying to verify as that Roblox account. \
+                         Please wait for their attempt to finish.");
+
+            let conn = self.0.database.connect()?;
+            conn.transaction(|| {
+                conn.execute(
+                    "REPLACE INTO discord_user_info (\
+                         discord_user_id, roblox_user_id, last_updated\
+                     ) VALUES (?1, null, ?2)", (discord_id, SystemTime::now()),
+                )?;
+                conn.execute(
+                    "INSERT INTO user_history (\
+                         discord_user_id, roblox_user_id, is_unverify, last_updated\
+                     ) VALUES (?1, ?2, ?3, ?4)", (discord_id, roblox_id, true, SystemTime::now()),
+                )?;
+                Ok(())
+            })?;
+        } else {
+            cmd_error!("Nobody is currently verified as that user.")
+        }
+        Ok(())
     }
 
     pub fn add_config<'a>(&self, config: &'a mut Vec<LuaConfigEntry>) {
