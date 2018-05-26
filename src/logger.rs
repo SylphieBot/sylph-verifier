@@ -1,6 +1,5 @@
 use chrono::{Date, Local};
 use errors::*;
-use linefeed::reader::LogSender;
 use log::*;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
@@ -60,10 +59,10 @@ fn munge_target(target: &str) -> &str {
 }
 
 static LOG_SENDER_LOCKED: AtomicBool = AtomicBool::new(false);
-static LOG_SENDER: Mutex<Option<LogSender>> = Mutex::new(None);
-pub fn set_log_sender(sender: LogSender) {
+static LOG_SENDER: Mutex<Option<Box<dyn Fn(&str) -> Result<()> + Send + Sync>>> = Mutex::new(None);
+pub fn set_log_sender(sender: impl Fn(&str) -> Result<()> + Send + Sync + 'static) {
     if !LOG_SENDER_LOCKED.load(Ordering::Relaxed) {
-        *LOG_SENDER.lock() = Some(sender);
+        *LOG_SENDER.lock() = Some(Box::new(sender));
     }
 }
 pub fn lock_log_sender() {
@@ -164,7 +163,7 @@ struct Logger {
 }
 fn log_raw(line: &str) {
     match LOG_SENDER.lock().as_ref() {
-        Some(sender) => if writeln!(sender, "{}", line).is_err() {
+        Some(sender) => if sender(line).is_err() {
             println!("{}", line);
         }
         None => println!("{}", line),
