@@ -311,8 +311,8 @@ static CORE_COMMANDS: &'static [Command] = &[
                     ctx.respond(format!(
                         "{}{}{}{}",
                         ctx.prefix(), command.name,
-                        command.help_args.map_or("".to_owned(), |x| format!(" {}", x)),
-                        command.help_desc.map_or("".to_owned(), |x| format!(" - {}", x))
+                        command.help_args.map_or(String::new(), |x| format!(" {}", x)),
+                        command.help_desc.map_or(String::new(), |x| format!(" - {}", x))
                     ))
                 } else {
                     ctx.respond("No such command was found.")
@@ -326,7 +326,7 @@ static CORE_COMMANDS: &'static [Command] = &[
                        ctx.has_permissions(command.permissions) {
                         writeln!(buffer, "• {}{}{}",
                                  ctx.prefix(), command.name,
-                                 command.help_args.map_or("".to_owned(), |x| format!(" {}", x)))?;
+                                 command.help_args.map_or(String::new(), |x| format!(" {}", x)))?;
                     }
                 }
                 writeln!(buffer, "For more information on a command, use `~help command`.")?;

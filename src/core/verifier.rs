@@ -302,8 +302,8 @@ impl Verifier {
     ) -> Result<VerifyResult> {
         let conn = self.0.database.connect()?;
 
-        debug!("Starting verification attempt: discord id {} -> roblox id {}",
-               discord_id.0, roblox_id.0);
+        debug!("Starting verification attempt: discord id {} -> roblox id {}, token = {}",
+               discord_id.0, roblox_id.0, token);
 
         let discord_lock = self.0.discord_lock.lock(discord_id);
         cmd_ensure!(discord_lock.is_some(),
@@ -423,6 +423,8 @@ impl Verifier {
         Ok(VerifyResult::VerificationOk)
     }
     pub fn unverify(&self, discord_id: UserId) -> Result<()> {
+        debug!("Starting unverification: discord id {}", discord_id.0);
+
         let discord_lock = self.0.discord_lock.lock(discord_id);
         cmd_ensure!(discord_lock.is_some(),
                     "Please wait for your last verification attempt to finish.");

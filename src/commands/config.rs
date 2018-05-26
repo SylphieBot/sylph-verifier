@@ -80,7 +80,7 @@ macro_rules! config_values {
                              if guild.is_some() && !$allow_guild {
                                 " *(This option cannot be overwritten per-server.)*".to_owned()
                              } else {
-                                "".to_owned()
+                                String::new()
                              })?;
                     writeln!(config, "{}{}", align, $help)?;
                 }

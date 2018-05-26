@@ -87,7 +87,7 @@ fn set_perms_for_scope(ctx: &CommandContext, scope: Scope, mut last_arg: usize) 
     write!(result, "{}", if !add_perms.is_empty() || !sub_perms.is_empty() {
         "New permissions for scope: "
     } else {
-        "Permissions for scope:"
+        "Permissions for scope: "
     })?;
     append_perms(&mut result, scope_perms)?;
     ctx.respond(&result)
@@ -102,7 +102,7 @@ fn set_perms(
         if arg.starts_with('+') || arg.starts_with('-') { break }
         last_arg += 1;
     }
-    let scope_args = ctx.arg_between(1, last_arg - 1)?;
+    let scope_args = if last_arg == 1 { "" } else { ctx.arg_between(1, last_arg - 1)? };
     set_perms_for_scope(ctx, parse_scope(scope_main, scope_args)?, last_arg)
 }
 
