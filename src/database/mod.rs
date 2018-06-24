@@ -267,7 +267,6 @@ macro_rules! migration {
 }
 static MIGRATIONS: &'static [Migration] = &[
     migration!(0, 2, "version_0_to_2.sql"),
-    migration!(2, 3, "version_2_to_3.sql"),
 ];
 const CURRENT_VERSION: u32 = 2;
 const FUTURE_VERSION_ERR: &str = "This database was created for a future version of this bot. \
