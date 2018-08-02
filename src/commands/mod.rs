@@ -107,7 +107,7 @@ impl Command {
         Command {
             name, help_args: None, help_desc: None,
             required_privilege: PrivilegeLevel::NormalUser,
-            discord_permissions: EnumSet::new(),
+            discord_permissions: enum_set!(),
             allowed_contexts: enum_set!(CommandTarget::Terminal |
                                         CommandTarget::ServerMessage |
                                         CommandTarget::PrivateMessage),
