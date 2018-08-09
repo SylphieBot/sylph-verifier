@@ -1244,8 +1244,8 @@ dependencies = [
 
 [[package]]
 name = "serenity"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+version = "0.5.7"
+source = "git+https://github.com/serenity-rs/serenity.git?rev=826220f351a688b2a6f1c6ec527e65a996861d22#826220f351a688b2a6f1c6ec527e65a996861d22"
 dependencies = [
  "base64 0.9.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitflags 1.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1350,7 +1350,7 @@ dependencies = [
  "serde 1.0.71 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.71 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.24 (registry+https://github.com/rust-lang/crates.io-index)",
- "serenity 0.5.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serenity 0.5.7 (git+https://github.com/serenity-rs/serenity.git?rev=826220f351a688b2a6f1c6ec527e65a996861d22)",
  "sha2 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "threadpool 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "uuid 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1927,7 +1927,7 @@ dependencies = [
 "checksum serde_derive 1.0.71 (registry+https://github.com/rust-lang/crates.io-index)" = "b719c6d5e9f73fbc37892246d5852333f040caa617b8873c6aced84bcb28e7bb"
 "checksum serde_json 1.0.24 (registry+https://github.com/rust-lang/crates.io-index)" = "c3c6908c7b925cd6c590358a4034de93dbddb20c45e1d021931459fd419bf0e2"
 "checksum serde_urlencoded 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)" = "e703cef904312097cfceab9ce131ff6bbe09e8c964a0703345a5f49238757bc1"
-"checksum serenity 0.5.6 (registry+https://github.com/rust-lang/crates.io-index)" = "f8fb8d05beb79417ab6ead7bc76f5aba513d9dad1270236dbbf9f6f42688364b"
+"checksum serenity 0.5.7 (git+https://github.com/serenity-rs/serenity.git?rev=826220f351a688b2a6f1c6ec527e65a996861d22)" = "<none>"
 "checksum sha1 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "cc30b1e1e8c40c121ca33b86c23308a090d19974ef001b4bf6e61fd1a0fb095c"
 "checksum sha1 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "2579985fda508104f7587689507983eadd6a6e84dd35d6d115361f530916fa0d"
 "checksum sha2 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)" = "9eb6be24e4c23a84d7184280d2722f7f2731fcdd4a9d886efbfe4413e4847ea0"
