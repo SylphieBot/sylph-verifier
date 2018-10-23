@@ -16,6 +16,9 @@ lto = true
 [features]
 release = []
 
+[patch.crates-io]
+openssl = { git = "https://github.com/Lymia/rust-openssl", version = "0.9.24", branch = "0.9.x" }
+
 [dependencies]
 backtrace = "0.3"
 byteorder = "1.1"
@@ -47,11 +50,9 @@ threadpool = "1.0"
 uuid = { version = "0.6", features = ["v5"] }
 
 [dependencies.serenity]
-version = "0.5"
+version = "0.5.9"
 default-features = false
 features = ["cache", "client", "model"]
-git = "https://github.com/serenity-rs/serenity.git"
-rev = "826220f351a688b2a6f1c6ec527e65a996861d22"
 
 [build-dependencies]
 git2 = "0.7"
