@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use serenity::model::prelude::*;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 struct DeleteRequest(ChannelId, MessageId);
 impl AsRef<MessageId> for DeleteRequest {
     fn as_ref(&self) -> &MessageId {
@@ -62,6 +62,9 @@ impl DeleteService {
     fn do_queued_deletes(&self) {
         if let Some(_lock) = self.0.delete_iter_lock.try_lock() {
             let mut queued = mem::replace(&mut *self.0.queued_deletes.lock(), Vec::new());
+            if queued.is_empty() {
+                return
+            }
             queued.sort_by_key(|x| x.0);
 
             let mut i = 0;
@@ -70,7 +73,6 @@ impl DeleteService {
             loop {
                 if i == queued.len() || queued[i].0 != current_channel_id {
                     let msgs = &queued[current_channel_start..i];
-
                     if msgs.len() == 1 {
                         let msg = msgs[0].1;
                         check_delete_result(msg,
@@ -80,8 +82,8 @@ impl DeleteService {
                                                  current_channel_id.delete_messages(msgs)).ok();
                     }
 
-                    if i < queued.len() {
-                        break
+                    if i == queued.len() {
+                        return
                     } else {
                         current_channel_start = i;
                         current_channel_id = queued[i].0;
@@ -94,7 +96,7 @@ impl DeleteService {
 
     pub fn queue_delete_message(&self, msg: &Message) {
         let cutoff = SystemTime::now() - Duration::from_secs(60 * 60 * 24 * 7);
-        if cutoff < msg.timestamp.into() {
+        if cutoff > msg.timestamp.into() {
             let channel_id = msg.channel_id;
             let id = msg.id;
             self.0.tasks.dispatch_task(move |_|
