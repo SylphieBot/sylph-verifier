@@ -40,7 +40,7 @@ percent-encoding = "1.0"
 r2d2 = "0.8"
 rand = "0.5"
 regex = "1.0"
-reqwest = "0.8"
+reqwest = "0.9"
 rusqlite = { version = "0.13", features = ["bundled"] }
 serde = "1.0"
 serde_derive = "1.0"

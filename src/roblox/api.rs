@@ -41,7 +41,7 @@ struct RobloxGroupLookup {
 crate fn web_profile_exists(id: RobloxUserID) -> Result<bool> {
     let uri = format!("https://www.roblox.com/users/{}/profile", id.0);
     let response = reqwest::get(&uri)?;
-    let response = if response.status() != StatusCode::NotFound {
+    let response = if response.status() != StatusCode::NOT_FOUND {
         response.error_for_status()?
     } else {
         response
