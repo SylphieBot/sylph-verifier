@@ -7,10 +7,10 @@ use std::borrow::Cow;
 use std::error::{Error as StdError};
 use std::fmt;
 use std::option::NoneError;
-use std::result::{Result as StdResult};
 
 pub use failure::{Fail, ResultExt};
 pub use hyper::status::StatusCode;
+pub use std::result::{Result as StdResult};
 
 pub struct StdErrorWrapper(Mutex<Box<dyn StdError + Send + 'static>>);
 impl fmt::Debug for StdErrorWrapper {

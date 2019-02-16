@@ -10,6 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod config;
+mod delete_service;
 mod discord;
 mod place;
 mod roles;
