@@ -108,8 +108,7 @@ impl VerificationChannelManager {
             Ok(format!("To verify your Roblox account with your Discord account, please \
                         follow these instructions:\n\
                         • Join the place at <https://roblox.com/--place?id={}> using the account \
-                          you want to verify as. Make sure you aren't in a party with anyone \
-                          else.\n\
+                          you want to verify as.\n\
                         • Type the command it shows in the oval box into this channel.",
                        place_id))
         } else {
