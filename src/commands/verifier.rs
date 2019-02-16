@@ -180,8 +180,8 @@ fn find_role(guild_id: GuildId, role_name: &str) -> Result<RoleId> {
 fn whois_msg(
     ctx: &CommandContext, user: User, roblox_id: RobloxUserID, roblox_name: &str
 ) -> Result<()> {
-    ctx.respond(format!("{} is verified as {} (https://www.roblox.com/users/{}/profile)",
-                        user.tag(), roblox_name, roblox_id.0))
+    ctx.respond(format!("{} (#{}) is verified as {} (https://www.roblox.com/users/{}/profile)",
+                        user.tag(), user.id.0, roblox_name, roblox_id.0))
 }
 fn whois_discord(ctx: &CommandContext, discord_user_id: UserId) -> Result<()> {
     let user = discord_user_id.to_user().map_err(Error::from)
@@ -192,12 +192,12 @@ fn whois_discord(ctx: &CommandContext, discord_user_id: UserId) -> Result<()> {
         if let Some(roblox_name) = roblox_name {
             whois_msg(ctx, user, roblox_user_id, &roblox_name)
         } else {
-            cmd_error!("{} is verified as Roblox User ID #{}, which no longer exists. \
+            cmd_error!("{} (#{}) is verified as Roblox User ID #{}, which no longer exists. \
                         (https://www.roblox.com/users/{}/profile)",
-                       user.tag(), roblox_user_id.0, roblox_user_id.0)
+                       user.tag(), user.id.0, roblox_user_id.0, roblox_user_id.0)
         }
     } else {
-        cmd_error!("{} isn't verified.", user.tag())
+        cmd_error!("{} (#{}) isn't verified.", user.tag(), user.id.0)
     }
 }
 fn whois_roblox(ctx: &CommandContext, roblox_name: &str) -> Result<()> {
