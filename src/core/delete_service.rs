@@ -104,6 +104,12 @@ impl DeleteService {
             );
         } else {
             self.0.queued_deletes.lock().push(DeleteRequest(msg.channel_id, msg.id));
+            
+            let delete_service = self.clone();
+            self.0.tasks.dispatch_task(move |_| {
+                delete_service.do_queued_deletes();
+                Ok(())
+            });
         }
     }
 }
