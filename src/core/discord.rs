@@ -1,6 +1,7 @@
 use commands::*;
 use core::CoreRef;
 use core::config::*;
+use core::delete_service::DeleteService;
 use core::roles::*;
 use core::tasks::*;
 use core::verification_channel::*;
@@ -20,12 +21,11 @@ use std::time::Duration;
 use util;
 use util::MultiMutex;
 
-// TODO: Batch delete operations.
-
 struct DiscordContext<'a> {
     ctx: Context, message: &'a Message, content: &'a str, prefix: String,
     privilege_level: PrivilegeLevel, command_target: CommandTarget, command_no: usize,
-    is_verification_channel: bool, delete_in: u32, tasks: TaskManager,
+    is_verification_channel: bool, delete_in: u32,
+    tasks: TaskManager, delete_service: DeleteService,
 }
 impl <'a> CommandContextData for DiscordContext<'a> {
     fn privilege_level(&self) -> PrivilegeLevel {
@@ -58,8 +58,10 @@ impl <'a> CommandContextData for DiscordContext<'a> {
             }
         )?;
         if self.is_verification_channel {
+            let delete_service = self.delete_service.clone();
             self.tasks.dispatch_delayed_task(Duration::from_secs(self.delete_in as u64), move |_| {
-                message.delete().map_err(Error::from).drop_nonfatal()
+                delete_service.queue_delete_message(&message);
+                Ok(())
             })
         }
         Ok(())
@@ -78,6 +80,7 @@ const STATUS_DROPPED : u8 = 4;
 struct DiscordBotSharedData {
     config: ConfigManager, core_ref: CoreRef, roles: RoleManager, tasks: TaskManager,
     verify_channel: VerificationChannelManager, is_in_command: MultiMutex<UserId>,
+    delete_service: DeleteService,
 }
 
 struct Handler {
@@ -154,6 +157,7 @@ impl Handler {
             None => (false, 0),
         };
         let tasks = self.shared.tasks.clone();
+        let delete_service = self.shared.delete_service.clone();
 
         thread::Builder::new().name(format!("command #{}", command_no)).spawn(move || {
             error_report::catch_error(move || {
@@ -161,7 +165,7 @@ impl Handler {
                 let ctx = DiscordContext {
                     ctx, message: &message, prefix, content: &content,
                     privilege_level, command_target, command_no,
-                    is_verification_channel, delete_in, tasks,
+                    is_verification_channel, delete_in, tasks, delete_service,
                 };
                 if let Some(_lock) = is_in_command.lock(message.author.id) {
                     core_ref.run_command(command, &ctx);
@@ -373,12 +377,13 @@ pub struct DiscordManager {
 impl DiscordManager {
     pub(in ::core) fn new(
         config: ConfigManager, core_ref: CoreRef, roles: RoleManager, tasks: TaskManager,
-        verify_channel: VerificationChannelManager,
+        verify_channel: VerificationChannelManager, delete_service: DeleteService
     ) -> DiscordManager {
         DiscordManager {
             bot: Mutex::new(BotStatus::NotConnected), shutdown: AtomicBool::new(false),
             shared: Arc::new(DiscordBotSharedData {
-                config, core_ref, roles, tasks, verify_channel, is_in_command: MultiMutex::new(),
+                config, core_ref, roles, tasks, verify_channel, delete_service,
+                is_in_command: MultiMutex::new(),
             }),
         }
     }

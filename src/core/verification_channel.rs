@@ -1,5 +1,6 @@
 use database::*;
 use core::config::*;
+use core::delete_service::DeleteService;
 use errors::*;
 use serenity::model::prelude::*;
 use std::sync::Arc;
@@ -11,15 +12,18 @@ use util::ConcurrentCache;
 struct VerificationChannelManagerData {
     config: ConfigManager, database: Database,
     channel_cache: ConcurrentCache<GuildId, Option<(ChannelId, MessageId)>>,
+    delete_service: DeleteService,
 }
 
 #[derive(Clone)]
 pub struct VerificationChannelManager(Arc<VerificationChannelManagerData>);
 impl VerificationChannelManager {
-    pub fn new(config: ConfigManager, database: Database) -> VerificationChannelManager {
+    pub fn new(
+        config: ConfigManager, database: Database, delete_service: DeleteService,
+    ) -> VerificationChannelManager {
         let db_ref_update = database.clone();
         VerificationChannelManager(Arc::new(VerificationChannelManagerData {
-            config, database,
+            config, database, delete_service,
             channel_cache: ConcurrentCache::new(move |&guild_id| {
                 Self::get_verification_channel(&db_ref_update, guild_id)
             }),
@@ -55,7 +59,7 @@ impl VerificationChannelManager {
         &self, guild_id: GuildId, message: &Message
     ) -> Result<()> {
         if self.is_verification_channel(guild_id, message.channel_id)? {
-            message.delete().map_err(Error::from).drop_nonfatal()?;
+            self.0.delete_service.queue_delete_message(message);
         }
         Ok(())
     }

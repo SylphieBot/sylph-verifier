@@ -24,6 +24,7 @@ pub use self::roles::{RoleManager, AssignedRole, ConfiguredRole, SetRolesStatus}
 pub use self::verification_channel::VerificationChannelManager;
 pub use self::verifier::{Verifier, VerifyResult, TokenStatus};
 
+use self::delete_service::DeleteService;
 use self::discord::DiscordManager;
 use self::place::PlaceManager;
 use self::terminal::Terminal;
@@ -92,14 +93,17 @@ impl VerifierCore {
         let core_ref = CoreRef::new();
 
         let tasks = TaskManager::new(core_ref.clone())?;
+        let delete_service = DeleteService::new(tasks.clone());
         let terminal = Terminal::new(core_ref.clone())?;
-        let verify_channel = VerificationChannelManager::new(config.clone(), database.clone());
+        let verify_channel = VerificationChannelManager::new(config.clone(), database.clone(),
+                                                             delete_service.clone());
         let verifier = Verifier::new(config.clone(), database.clone())?;
         let place = PlaceManager::new(place_target)?;
         let roles = RoleManager::new(config.clone(), database.clone(), verifier.clone(),
                                      tasks.clone());
         let discord = DiscordManager::new(config.clone(), core_ref.clone(), roles.clone(),
-                                          tasks.clone(), verify_channel.clone());
+                                          tasks.clone(), verify_channel.clone(),
+                                          delete_service.clone());
 
         tasks.dispatch_repeating_task(Duration::from_secs(60 * 10), |core| core.cleanup());
 

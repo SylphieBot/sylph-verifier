@@ -1,3 +1,4 @@
+use core::tasks::*;
 use errors::*;
 use parking_lot::Mutex;
 use std::fmt::Display;
@@ -5,8 +6,6 @@ use std::mem;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use serenity::model::prelude::*;
-
-use super::tasks::TaskManager;
 
 #[derive(Copy, Clone)]
 struct DeleteRequest(ChannelId, MessageId);
