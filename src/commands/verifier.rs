@@ -18,9 +18,9 @@ lazy_static! {
 }
 
 fn get_discord_username(discord_id: UserId) -> String {
-    match discord_id.find() {
+    match discord_id.to_user_cached() {
         Some(x) => x.read().tag(),
-        None => match discord_id.get() {
+        None => match discord_id.to_user() {
             Ok(x) => x.tag(),
             Err(_) => format!("(discord uid #{})", discord_id.0),
         }
@@ -76,7 +76,7 @@ fn do_verify(ctx: &CommandContext, _: &Context, msg: &Message) -> Result<()> {
     let discord_username = msg.author.tag();
     let discord_id = msg.author.id;
 
-    let guild_id = msg.guild_id()?;
+    let guild_id = msg.guild_id?;
 
     debug!("Beginning verification attempt: {} -> {}", discord_username, roblox_username);
 
@@ -150,7 +150,7 @@ fn check_configuration(ctx: &CommandContext, guild_id: GuildId) -> Result<()> {
 }
 
 fn find_role(guild_id: GuildId, role_name: &str) -> Result<RoleId> {
-    let guild = guild_id.find()?;
+    let guild = guild_id.to_guild_cached()?;
     let guild = guild.read();
 
     if let Some(captures) = MENTION_REGEX.captures(role_name) {
@@ -184,7 +184,7 @@ fn whois_msg(
                         user.tag(), roblox_name, roblox_id.0))
 }
 fn whois_discord(ctx: &CommandContext, discord_user_id: UserId) -> Result<()> {
-    let user = discord_user_id.get().map_err(Error::from)
+    let user = discord_user_id.to_user().map_err(Error::from)
         .status_to_cmd(StatusCode::NotFound, || "That Discord account does not exist.")?;
     let roblox_user_id = ctx.core.verifier().get_verified_roblox_user(discord_user_id)?;
     if let Some(roblox_user_id) = roblox_user_id {
@@ -205,9 +205,10 @@ fn whois_roblox(ctx: &CommandContext, roblox_name: &str) -> Result<()> {
         .to_cmd_err(|| format!("No such Roblox user '{}' exists.", roblox_name))?;
     let discord_user_id = ctx.core.verifier().get_verified_discord_user(roblox_user_id)?;
     if let Some(discord_user_id) = discord_user_id {
-        let user = discord_user_id.get().map_err(Error::from).status_to_cmd(StatusCode::NotFound, ||
-            format!("The Discord account verified with '{}' no longer exists.", roblox_name)
-        )?;
+        let user = discord_user_id.to_user().map_err(Error::from)
+            .status_to_cmd(StatusCode::NotFound, ||
+                format!("The Discord account verified with '{}' no longer exists.", roblox_name)
+            )?;
         whois_msg(ctx, user, roblox_user_id, roblox_name)
     } else {
         cmd_error!("No Discord user has verified as {} (https://www.roblox.com/users/{}/profile)",
@@ -243,7 +244,7 @@ crate const COMMANDS: &[Command] = &[
         .required_permissions(enum_set!(DiscordPermission::ManageRoles))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg| {
-            let guild_id = msg.guild_id()?;
+            let guild_id = msg.guild_id?;
 
             let mut config = String::new();
             let config_map = ctx.core.roles().get_configuration(guild_id)?;
@@ -260,7 +261,7 @@ crate const COMMANDS: &[Command] = &[
                     });
                 writeln!(config, "• {} = {}", role, definition)?;
                 if let Some(role_id) = role_data.role_id {
-                    let guild = guild_id.find()?;
+                    let guild = guild_id.to_guild_cached()?;
                     let guild = guild.read();
                     match guild.roles.get(&role_id) {
                         Some(role) =>
@@ -288,7 +289,7 @@ crate const COMMANDS: &[Command] = &[
         .exec_discord(|ctx, _, msg| {
             let rule_name = ctx.arg(0)?;
             let role_name = ctx.rest(1)?.trim();
-            let guild_id = msg.guild_id()?;
+            let guild_id = msg.guild_id?;
             let my_id = serenity::CACHE.read().user.id;
             if !role_name.is_empty() {
                 let role_id = find_role(guild_id, role_name)?;
@@ -313,7 +314,7 @@ crate const COMMANDS: &[Command] = &[
         .exec_discord(|ctx, _, msg| {
             let rule_name = ctx.arg(0)?;
             let definition = ctx.rest(1)?.trim();
-            let guild_id = msg.guild_id()?;
+            let guild_id = msg.guild_id?;
             if !definition.is_empty() {
                 ctx.core.roles().set_custom_rule(guild_id, rule_name, Some(definition))?;
             } else {
@@ -328,7 +329,7 @@ crate const COMMANDS: &[Command] = &[
         .exec_discord(|ctx, _, msg| {
             let roblox_username = ctx.arg(0)?;
             let roblox_id = RobloxUserID::for_username(roblox_username)?;
-            let guild_id = msg.guild_id()?;
+            let guild_id = msg.guild_id?;
 
             let mut roles = String::new();
             for role in ctx.core.roles().get_assigned_roles(guild_id, roblox_id)? {
@@ -359,7 +360,7 @@ crate const COMMANDS: &[Command] = &[
                         "You are not verified with this bot. {}",
                         ctx.core.verify_channel().verify_instructions()?);
 
-            let guild_id = msg.guild_id()?;
+            let guild_id = msg.guild_id?;
             let cooldown =
                 ctx.core.config().get(Some(guild_id), ConfigKeys::UpdateCooldownSeconds)?;
             let status = ctx.core.roles().update_user_with_cooldown(
@@ -383,7 +384,7 @@ crate const COMMANDS: &[Command] = &[
         .required_permissions(enum_set!(DiscordPermission::ManageGuild |
                                         DiscordPermission::ManageMessages))
         .exec_discord(|ctx, _, msg| {
-            let guild_id = msg.guild_id()?;
+            let guild_id = msg.guild_id?;
             if let Some("confirm") = ctx.arg_opt(0) {
                 ctx.core.verify_channel().setup(guild_id, msg.channel_id)?;
             } else {
@@ -409,7 +410,7 @@ crate const COMMANDS: &[Command] = &[
         .required_permissions(enum_set!(DiscordPermission::ManageGuild |
                                         DiscordPermission::ManageMessages))
         .exec_discord(|ctx, _, msg| {
-            let guild_id = msg.guild_id()?;
+            let guild_id = msg.guild_id?;
             ctx.core.verify_channel().remove(guild_id)?;
             Ok(())
         }),
@@ -421,7 +422,7 @@ crate const COMMANDS: &[Command] = &[
         .exec_discord(|ctx, _, msg| {
             let rule = ctx.rest(0)?;
             if rule == "" {
-                let guild_id = msg.guild_id()?;
+                let guild_id = msg.guild_id?;
                 maybe_sprunge(ctx, &ctx.core.roles().explain_rule_set(guild_id)?)
             } else {
                 let rule = format!("{}", VerificationRule::from_str(rule)?);

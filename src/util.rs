@@ -175,19 +175,19 @@ pub fn sprunge(text: &str) -> Result<String> {
 
 // Hierarchy access helpers
 pub fn can_member_access_role(guild_id: GuildId, member_id: UserId, role: RoleId) -> Result<bool> {
-    let guild = guild_id.find()?;
+    let guild = guild_id.to_guild_cached()?;
     let owner_id = guild.read().owner_id;
 
     if member_id == owner_id {
         Ok(true)
     } else {
         match guild.read().member(member_id)?.highest_role_info() {
-            Some((_, position)) => Ok(role.find()?.position < position),
+            Some((_, position)) => Ok(role.to_role_cached()?.position < position),
             None => Ok(false),
         }
     }
 }
 pub fn can_member_access_member(guild_id: GuildId, from: UserId, to: UserId) -> Result<bool> {
-    let guild = guild_id.find()?;
+    let guild = guild_id.to_guild_cached()?;
     Ok(from == to || guild.read().greater_member_hierarchy(from, to) == Some(from))
 }
