@@ -190,7 +190,7 @@ fn do_whois(ctx: &CommandContext) -> Result<()> {
 }
 
 fn format_discord_id(id: UserId) -> String {
-    match id.get() {
+    match id.to_user() {
         Ok(user) => user.tag(),
         Err(_) => format!("*(non-existent Discord id #{})*", id.0),
     }
@@ -230,7 +230,7 @@ fn do_whowas(ctx: &CommandContext) -> Result<()> {
 fn force_unverify(
     ctx: &CommandContext, discord_id: UserId, roblox_id: RobloxUserID,
 ) -> Result<()> {
-    let user = discord_id.get().map_err(Error::from)
+    let user = discord_id.to_user().map_err(Error::from)
         .status_to_cmd(StatusCode::NotFound, || "That Discord account does not exist.")?;
     ctx.core.verifier().unverify(discord_id)?;
     ctx.respond(format!("User {} has been unverified with {}.",
@@ -416,7 +416,7 @@ crate const COMMANDS: &[Command] = &[
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .required_permissions(enum_set!(BotPermission::Unverify))
         .exec_discord(|ctx, _, msg| {
-            let guild_id = msg.guild_id()?;
+            let guild_id = msg.guild_id?;
             ctx.core.verifier().unverify(msg.author.id)?;
             let status = ctx.core.roles().assign_roles(guild_id, msg.author.id, None)?;
             ctx.respond(verify_status_str(ctx.prefix(), status))

@@ -8,7 +8,7 @@ lazy_static! {
 }
 
 crate fn find_role(guild_id: GuildId, role_name: &str) -> Result<RoleId> {
-    let guild = guild_id.find()?;
+    let guild = guild_id.to_guild_cached()?;
     let guild = guild.read();
 
     if let Some(captures) = MENTION_REGEX.captures(role_name) {

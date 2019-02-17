@@ -139,7 +139,7 @@ impl PermissionManager {
     pub fn get_user_perms(
         &self, guild_id: GuildId, user: UserId,
     ) -> Result<EnumSet<BotPermission>> {
-        let guild = guild_id.find()?;
+        let guild = guild_id.to_guild_cached()?;
         let guild = guild.read();
 
         let mut guild_perms = self.get_scope(Scope::GuildAllUsers(guild_id))?;
@@ -158,7 +158,8 @@ impl PermissionManager {
     pub fn on_cleanup_tick(&self) {
         self.0.scope_cache.shrink_to_fit();
     }
-    pub fn on_guild_remove(&self, guild: GuildId) {
+    pub fn on_guild_remove(&self, _: GuildId) {
+        // TODO: Implement
         self.0.scope_cache.shrink_to_fit();
     }
 }
