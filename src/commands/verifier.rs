@@ -51,7 +51,7 @@ fn verify_status_str(prefix: &str, result: SetRolesStatus) -> Cow<'static, str> 
     }
 }
 fn reverify_help(
-    ctx: &CommandContext, discord_id: UserId, roblox_id: RobloxUserID
+    ctx: &CommandContext, discord_id: UserId, roblox_id: RobloxUserID,
 ) -> Result<String> {
     if ctx.core.verifier().get_verified_roblox_user(discord_id)? == Some(roblox_id) {
         Ok(format!(" If you only want to update your roles, use the '{}update' command.",
@@ -59,6 +59,23 @@ fn reverify_help(
     } else {
         Ok(String::new())
     }
+}
+fn log_unverify(
+    ctx: &CommandContext, discord_id: UserId, roblox_id: RobloxUserID,
+) -> Result<()> {
+    let log_channel = ctx.core.config().get(None, ConfigKeys::GlobalVerificationLogChannel)?;
+    if let Some(log_channel_id) = log_channel {
+        let log_channel_id = ChannelId(log_channel_id);
+        let discord_username = discord_id.to_user()?.tag();
+        let roblox_username = roblox_id.lookup_username()?;
+        log_channel_id.send_message(|m|
+            m.content(format_args!("`[{}]` ⚠ {} (`{}`) has been unverified.\n\
+                                    Old Roblox account: `{}` (https://www.roblox.com/users/{}/profile)",
+                                  Utc::now().format("%H:%M:%S"),
+                                  discord_username, discord_id.0, roblox_username, roblox_id.0))
+        )?;
+    }
+    Ok(())
 }
 fn do_verify(ctx: &CommandContext, _: &Context, msg: &Message) -> Result<()> {
     cmd_ensure!(ctx.argc() >= 2, ctx.core.verify_channel().verify_instructions()?);
@@ -271,7 +288,9 @@ fn force_unverify(
         .status_to_cmd(StatusCode::NotFound, || "That Discord account does not exist.")?;
     ctx.core.verifier().unverify(discord_id)?;
     ctx.respond(format!("User {} has been unverified with {}.",
-                        user.tag(), roblox_id.lookup_username()?))
+                        user.tag(), roblox_id.lookup_username()?))?;
+    log_unverify(ctx, discord_id, roblox_id)?;
+    Ok(())
 }
 fn do_force_unverify(ctx: &CommandContext) -> Result<()> {
     let target_name = ctx.arg(0)?;
@@ -290,6 +309,19 @@ fn do_force_unverify(ctx: &CommandContext) -> Result<()> {
         } else {
             cmd_error!("No Discord user has verified as {}.", target_name);
         }
+    }
+}
+fn do_unverify(ctx: &CommandContext, _: &Context, msg: &Message) -> Result<()> {
+    let guild_id = msg.guild_id?;
+    let roblox_id = ctx.core.verifier().get_verified_roblox_user(msg.author.id)?;
+    if let Some(roblox_id) = roblox_id {
+        ctx.core.verifier().unverify(msg.author.id)?;
+        let status = ctx.core.roles().assign_roles(guild_id, msg.author.id, None)?;
+        ctx.respond(verify_status_str(ctx.prefix(), status))?;
+        force_unverify(ctx, msg.author.id, roblox_id)?;
+        Ok(())
+    } else {
+        cmd_error!("Your Discord account is not currently verified.");
     }
 }
 
@@ -452,14 +484,10 @@ crate const COMMANDS: &[Command] = &[
         .help(None, "Unverifies your Roblox account from your Discord account.")
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .required_permissions(enum_set!(BotPermission::Unverify))
-        .exec_discord(|ctx, _, msg| {
-            let guild_id = msg.guild_id?;
-            ctx.core.verifier().unverify(msg.author.id)?;
-            let status = ctx.core.roles().assign_roles(guild_id, msg.author.id, None)?;
-            ctx.respond(verify_status_str(ctx.prefix(), status))
-        }),
+        .exec_discord(do_unverify),
     Command::new("force_unverify")
-        .help(None, "Unverifies your Roblox account from your Discord account.")
+        .help(Some("<discord mention, user id, or roblox username>"), 
+              "Forcefully unverifies a Roblox account from a Discord account.")
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .required_permissions(enum_set!(BotPermission::UnverifyOther))
         .exec(do_force_unverify),

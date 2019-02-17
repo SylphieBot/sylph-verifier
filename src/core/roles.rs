@@ -45,7 +45,7 @@ pub struct AssignedRole {
 pub enum SetRolesStatus {
     Success {
         nickname_admin_error: bool, determine_roles_error: bool,
-        set_roles_error: bool, is_unverified: bool,
+        set_roles_error: bool, was_unverified: bool,
     },
     NotVerified,
 }
@@ -277,6 +277,7 @@ impl RoleManager {
 
         let mut determine_roles_error = false;
         let mut set_roles_error = false;
+        let mut was_unverified = false;
         if let Some(roblox_id) = roblox_id {
             for role in self.get_assigned_roles(guild, roblox_id)? {
                 match role.is_assigned {
@@ -300,6 +301,7 @@ impl RoleManager {
                     if member.roles.contains(&id) {
                         trace!("Removing role from {}: {}", member.distinct(), id.0);
                         set_roles_error |= member.remove_role(id).is_err();
+                        was_unverified = true;
                     }
                 }
             }
@@ -307,9 +309,7 @@ impl RoleManager {
 
         Ok(SetRolesStatus::Success {
             nickname_admin_error: !can_access_user && do_set_nickname,
-            determine_roles_error,
-            set_roles_error,
-            is_unverified: roblox_id.is_none(),
+            determine_roles_error, set_roles_error, was_unverified,
         })
     }
 
@@ -385,7 +385,7 @@ impl RoleManager {
     fn send_unverified_msg(
         result: SetRolesStatus, user_id: UserId, unverified_msg: Option<String>,
     ) -> Result<()> {
-        if let SetRolesStatus::Success { is_unverified: true, .. } = result {
+        if let SetRolesStatus::Success { was_unverified: true, .. } = result {
             if let Some(unverified_msg) = unverified_msg {
                 user_id.create_dm_channel()?.send_message(|m| m.content(unverified_msg))?;
             }
