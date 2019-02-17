@@ -117,6 +117,11 @@ config_values! {
         "Whether the bot will auto-update the roles of users who aren't verified \
          (i.e. remove them).",
         parse_bool, print_display);
+    auto_update_unverified_roles_message<Option<String>>(
+        EnableAutoUpdateUnverifiedMessage, true, GuildShowType::OnlyInGuild,
+        "The message to send users when they are unverified due to `auto_update_unverified_roles`.",
+        |x|    Ok(Some(x.to_owned())),
+        |_, x| Ok(x.unwrap_or_else(|| "*(not enabled)*".to_owned())));
 
     update_cooldown<u64>(
         UpdateCooldownSeconds, true, GuildShowType::OnlyInGuild,

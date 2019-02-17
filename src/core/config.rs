@@ -210,6 +210,7 @@ config_keys! {
     SetRolesOnJoin<bool>(false);
     EnableAutoUpdate<bool>(false);
     EnableAutoUpdateUnverified<bool>(false);
+    EnableAutoUpdateUnverifiedMessage<Option<String>>(None);
 
     UpdateCooldownSeconds<u64>(60 * 60);
     AutoUpdateCooldownSeconds<u64>(60 * 60 * 24);

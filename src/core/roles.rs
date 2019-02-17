@@ -14,6 +14,7 @@ use std::time::{SystemTime, Duration};
 use roblox::{VerificationSet, VerificationRule, RuleResult, RobloxUserID};
 use util;
 use util::ConcurrentCache;
+use error_report::catch_error;
 
 // TODO: Prevent assigning the same role id to two rules.
 // TODO: Allow unlinking of roles assigned to deleted rules.
@@ -40,8 +41,12 @@ pub struct AssignedRole {
     pub rule: String, pub role_id: RoleId, pub is_assigned: RuleResult,
 }
 
+#[derive(Copy, Clone)]
 pub enum SetRolesStatus {
-    Success { nickname_admin_error: bool, determine_roles_error: bool, set_roles_error: bool },
+    Success {
+        nickname_admin_error: bool, determine_roles_error: bool,
+        set_roles_error: bool, is_unverified: bool,
+    },
     NotVerified,
 }
 
@@ -304,6 +309,7 @@ impl RoleManager {
             nickname_admin_error: !can_access_user && do_set_nickname,
             determine_roles_error,
             set_roles_error,
+            is_unverified: roblox_id.is_none(),
         })
     }
 
@@ -376,6 +382,16 @@ impl RoleManager {
         }
     }
 
+    fn send_unverified_msg(
+        result: SetRolesStatus, user_id: UserId, unverified_msg: Option<String>,
+    ) -> Result<()> {
+        if let SetRolesStatus::Success { is_unverified: true, .. } = result {
+            if let Some(unverified_msg) = unverified_msg {
+                user_id.create_dm_channel()?.send_message(|m| m.content(unverified_msg))?;
+            }
+        }
+        Ok(())
+    }
     pub fn check_roles_update_msg(&self, guild_id: GuildId, user_id: UserId) -> Result<()> {
         if user_id != serenity::CACHE.read().user.id {
             if self.0.config.get(Some(guild_id), ConfigKeys::EnableAutoUpdate)? {
@@ -383,11 +399,21 @@ impl RoleManager {
                     self.0.config.get(Some(guild_id), ConfigKeys::AutoUpdateCooldownSeconds)?;
                 let update_unverified =
                     self.0.config.get(Some(guild_id), ConfigKeys::EnableAutoUpdateUnverified)?;
+                let unverified_msg =
+                    self.0.config.get(Some(guild_id),
+                                      ConfigKeys::EnableAutoUpdateUnverifiedMessage)?;
                 let roles = self.clone();
                 self.0.tasks.dispatch_task(move |_| {
-                    roles.update_user_with_cooldown(
+                    let result = roles.update_user_with_cooldown(
                         guild_id, user_id, auto_update_cooldown, false, update_unverified,
-                    ).drop_nonfatal()
+                    );
+                    if let Ok(result) = &result {
+                        catch_error(||
+                            Self::send_unverified_msg(*result, user_id, unverified_msg)
+                                .drop_nonfatal()
+                        ).ok();
+                    }
+                    result.drop_nonfatal()
                 })
             }
         }

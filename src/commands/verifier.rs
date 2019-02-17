@@ -23,7 +23,7 @@ fn get_discord_username(discord_id: UserId) -> String {
 fn verify_status_str(prefix: &str, result: SetRolesStatus) -> Cow<'static, str> {
     match result {
         SetRolesStatus::Success {
-            nickname_admin_error, determine_roles_error, set_roles_error,
+            nickname_admin_error, determine_roles_error, set_roles_error, ..
         } => {
             if determine_roles_error || set_roles_error {
                 format!(
