@@ -141,8 +141,10 @@ impl PermissionManager {
 
         let mut guild_perms = self.get_scope(Scope::GuildAllUsers(guild_id))?;
         guild_perms |= self.get_scope(Scope::GuildUser(guild_id, user))?;
-        for &role in &guild.members.get(&user)?.roles {
-            guild_perms |= self.get_scope(Scope::GuildRole(guild_id, role))?;
+        if let Some(user) = guild.members.get(&user) {
+            for &role in &user.roles {
+                guild_perms |= self.get_scope(Scope::GuildRole(guild_id, role))?;
+            }
         }
         if guild_perms.contains(BotPermission::GuildAdmin) || guild.owner_id == user {
             guild_perms = self.get_guild_perms(guild_id)?;
