@@ -1,3 +1,4 @@
+use chrono::Utc;
 use core::config::*;
 use core::tasks::*;
 use core::verifier::*;
@@ -382,12 +383,23 @@ impl RoleManager {
         }
     }
 
-    fn send_unverified_msg(
-        result: SetRolesStatus, user_id: UserId, unverified_msg: Option<String>,
+    fn on_unverified_update(
+        result: SetRolesStatus, user_id: UserId, 
+        unverified_msg: Option<String>, log_channel: Option<u64>,
     ) -> Result<()> {
         if let SetRolesStatus::Success { was_unverified: true, .. } = result {
             if let Some(unverified_msg) = unverified_msg {
                 user_id.create_dm_channel()?.send_message(|m| m.content(unverified_msg))?;
+            }
+            if let Some(log_channel_id) = log_channel {
+                let log_channel_id = ChannelId(log_channel_id);
+                let discord_username = user_id.to_user()?.tag();
+                log_channel_id.send_message(|m|
+                    m.content(format_args!("`[{}]` 🇫 {} (`{}`) has been unverified due to having \
+                                            been a legacy verification.",
+                                           Utc::now().format("%H:%M:%S"),
+                                           discord_username, user_id.0))
+                )?;
             }
         }
         Ok(())
@@ -402,6 +414,8 @@ impl RoleManager {
                 let unverified_msg =
                     self.0.config.get(Some(guild_id),
                                       ConfigKeys::EnableAutoUpdateUnverifiedMessage)?;
+                let log_channel = 
+                    self.0.config.get(None, ConfigKeys::GlobalVerificationLogChannel)?;
                 let roles = self.clone();
                 self.0.tasks.dispatch_task(move |_| {
                     let result = roles.update_user_with_cooldown(
@@ -409,8 +423,9 @@ impl RoleManager {
                     );
                     if let Ok(result) = &result {
                         catch_error(||
-                            Self::send_unverified_msg(*result, user_id, unverified_msg)
-                                .drop_nonfatal()
+                            Self::on_unverified_update(
+                                *result, user_id, unverified_msg, log_channel,
+                            ).drop_nonfatal()
                         ).ok();
                     }
                     result.drop_nonfatal()

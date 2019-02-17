@@ -318,7 +318,7 @@ fn do_unverify(ctx: &CommandContext, _: &Context, msg: &Message) -> Result<()> {
         ctx.core.verifier().unverify(msg.author.id)?;
         let status = ctx.core.roles().assign_roles(guild_id, msg.author.id, None)?;
         ctx.respond(verify_status_str(ctx.prefix(), status))?;
-        force_unverify(ctx, msg.author.id, roblox_id)?;
+        log_unverify(ctx, msg.author.id, roblox_id)?;
         Ok(())
     } else {
         cmd_error!("Your Discord account is not currently verified.");
