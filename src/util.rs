@@ -78,10 +78,10 @@ impl <T: Hash + Eq> Drop for MultiMutexGuard<T> {
 }
 
 #[derive(Clone)]
-pub struct MultiMutex<T: Hash + Eq>(Arc<Mutex<HashSet<T>>>);
-impl <T: Hash + Eq + Clone> MultiMutex<T> {
-    pub fn new() -> MultiMutex<T> {
-        MultiMutex(Arc::new(Mutex::new(HashSet::new())))
+pub struct MutexSet<T: Hash + Eq>(Arc<Mutex<HashSet<T>>>);
+impl <T: Hash + Eq + Clone> MutexSet<T> {
+    pub fn new() -> MutexSet<T> {
+        MutexSet(Arc::new(Mutex::new(HashSet::new())))
     }
 
     pub fn lock(&self, id: T) -> Option<MultiMutexGuard<T>> {

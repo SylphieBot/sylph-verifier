@@ -2,9 +2,11 @@ use commands::*;
 use core::CoreRef;
 use core::config::*;
 use core::delete_service::DeleteService;
+use core::permissions::*;
 use core::roles::*;
 use core::tasks::*;
 use core::verification_channel::*;
+use enumset::*;
 use errors::*;
 use error_report;
 use parking_lot::{Mutex, RwLock};
@@ -19,17 +21,17 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;
 use std::time::Duration;
 use util;
-use util::MultiMutex;
+use util::MutexSet;
 
 struct DiscordContext<'a> {
     ctx: Context, message: &'a Message, content: &'a str, prefix: String,
-    privilege_level: PrivilegeLevel, command_target: CommandTarget, command_no: usize,
+    permissions: EnumSet<BotPermission>, command_target: CommandTarget, command_no: usize,
     is_verification_channel: bool, delete_in: u32,
     tasks: TaskManager, delete_service: DeleteService,
 }
 impl <'a> CommandContextData for DiscordContext<'a> {
-    fn privilege_level(&self) -> PrivilegeLevel {
-        self.privilege_level
+    fn permissions(&self) -> EnumSet<BotPermission> {
+        self.permissions
     }
     fn command_target(&self) -> CommandTarget {
         self.command_target
@@ -79,8 +81,8 @@ const STATUS_DROPPED : u8 = 4;
 
 struct DiscordBotSharedData {
     config: ConfigManager, core_ref: CoreRef, roles: RoleManager, tasks: TaskManager,
-    verify_channel: VerificationChannelManager, is_in_command: MultiMutex<UserId>,
-    delete_service: DeleteService,
+    permissions: PermissionManager, verify_channel: VerificationChannelManager,
+    is_in_command: MutexSet<UserId>, delete_service: DeleteService,
 }
 
 struct Handler {
@@ -103,27 +105,6 @@ impl Handler {
             Channel::Category(ref category) => format!("category #{}", category.read().id).into(),
         }
     }
-    fn message_info(
-        user_id: UserId, channel: &Channel, bot_owner_id: Option<UserId>,
-    ) -> Result<(PrivilegeLevel, CommandTarget)> {
-        Ok(match channel {
-            Channel::Guild(ref channel) => {
-                let guild = channel.read().guild()?;
-                let guild = guild.read();
-                let privilege =
-                    if Some(user_id) == bot_owner_id {
-                        PrivilegeLevel::BotOwner
-                    } else if user_id == guild.owner_id {
-                        PrivilegeLevel::GuildOwner
-                    } else {
-                        PrivilegeLevel::NormalUser
-                    };
-                (privilege, CommandTarget::ServerMessage)
-            }
-            Channel::Group(_) | Channel::Private(_) | Channel::Category(_) =>
-                (PrivilegeLevel::NormalUser, CommandTarget::PrivateMessage),
-        })
-    }
 
     fn start_command_thread(
         &self, ctx: Context, message: Message, channel: Channel, guild_id: Option<GuildId>,
@@ -133,21 +114,28 @@ impl Handler {
         let head = format!("{} in {}", message.author.tag(), Self::context_str(&channel));
         debug!("Assigning ID #{} to command from {}: {:?}", command_no, head, message.content);
 
-        let user_id = serenity::CACHE.read().user.id;
+        let my_user_id = serenity::CACHE.read().user.id;
         if let Channel::Guild(ref channel) = channel {
             let channel = channel.read();
-            if !channel.permissions_for(user_id)?.contains(Permissions::SEND_MESSAGES) {
+            if !channel.permissions_for(my_user_id)?.contains(Permissions::SEND_MESSAGES) {
                 debug!("Command ID #{} canceled (No Send Messages permission.)", command_no);
                 return Ok(())
             }
         }
 
         let core_ref = self.shared.core_ref.clone();
-        let bot_owner_id = self.shared.config.get(None, ConfigKeys::BotOwnerId)?.map(UserId);
         let is_in_command = self.shared.is_in_command.clone();
 
-        let (privilege_level, command_target) =
-            Self::message_info(message.author.id, &channel, bot_owner_id)?;
+        let permissions = match guild_id {
+            Some(guild_id) => self.shared.permissions.get_user_perms(guild_id, message.author.id)?,
+            None => self.shared.permissions.get_user_global_perms(message.author.id)?,
+        };
+        let command_target = match channel {
+            Channel::Guild(_) =>
+                CommandTarget::ServerMessage,
+            Channel::Group(_) | Channel::Private(_) | Channel::Category(_) =>
+                CommandTarget::PrivateMessage,
+        };
         let (is_verification_channel, delete_in) = match guild_id {
             Some(guild_id) => (
                 self.shared.verify_channel.is_verification_channel(guild_id, message.channel_id)?,
@@ -164,7 +152,7 @@ impl Handler {
                 info!("{}: {}", head, message.content);
                 let ctx = DiscordContext {
                     ctx, message: &message, prefix, content: &content,
-                    privilege_level, command_target, command_no,
+                    permissions, command_target, command_no,
                     is_verification_channel, delete_in, tasks, delete_service,
                 };
                 if let Some(_lock) = is_in_command.lock(message.author.id) {
@@ -185,6 +173,7 @@ impl Handler {
     fn on_guild_remove(&self, guild_id: GuildId) {
         self.shared.roles.on_guild_remove(guild_id);
         self.shared.config.on_guild_remove(guild_id);
+        self.shared.permissions.on_guild_remove(guild_id);
         self.shared.verify_channel.on_guild_remove(guild_id);
     }
 }
@@ -377,13 +366,14 @@ pub struct DiscordManager {
 impl DiscordManager {
     pub(in ::core) fn new(
         config: ConfigManager, core_ref: CoreRef, roles: RoleManager, tasks: TaskManager,
-        verify_channel: VerificationChannelManager, delete_service: DeleteService
+        verify_channel: VerificationChannelManager, delete_service: DeleteService,
+        permissions: PermissionManager,
     ) -> DiscordManager {
         DiscordManager {
             bot: Mutex::new(BotStatus::NotConnected), shutdown: AtomicBool::new(false),
             shared: Arc::new(DiscordBotSharedData {
-                config, core_ref, roles, tasks, verify_channel, delete_service,
-                is_in_command: MultiMutex::new(),
+                config, core_ref, roles, tasks, verify_channel, delete_service, permissions,
+                is_in_command: MutexSet::new(),
             }),
         }
     }

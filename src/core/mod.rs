@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 mod config;
 mod delete_service;
 mod discord;
+mod permissions;
 mod place;
 mod roles;
 mod tasks;
@@ -19,13 +20,16 @@ mod terminal;
 mod verification_channel;
 mod verifier;
 
-pub use self::config::{ConfigManager, ConfigKey, ConfigKeys};
+pub use self::config::{ConfigKey, ConfigKeys};
+pub use self::permissions::{BotPermission, Scope};
 pub use self::roles::{RoleManager, AssignedRole, ConfiguredRole, SetRolesStatus};
 pub use self::verification_channel::VerificationChannelManager;
-pub use self::verifier::{Verifier, VerifyResult, TokenStatus};
+pub use self::verifier::{Verifier, VerifyResult, TokenStatus, HistoryEntry};
 
+use self::config::ConfigManager;
 use self::delete_service::DeleteService;
 use self::discord::DiscordManager;
+use self::permissions::PermissionManager;
 use self::place::PlaceManager;
 use self::terminal::Terminal;
 use self::tasks::TaskManager;
@@ -38,7 +42,8 @@ struct VerifierCoreData {
     status: AtomicU8,
     _database: Database, config: ConfigManager, core_ref: CoreRef,
     terminal: Terminal, verifier: Verifier, discord: DiscordManager,
-    place: PlaceManager, roles: RoleManager, _tasks: TaskManager,
+    place: PlaceManager, roles: RoleManager, permissions: PermissionManager,
+    _tasks: TaskManager,
     verify_channel: VerificationChannelManager,
 }
 
@@ -98,19 +103,21 @@ impl VerifierCore {
         let verify_channel = VerificationChannelManager::new(config.clone(), database.clone(),
                                                              delete_service.clone());
         let verifier = Verifier::new(config.clone(), database.clone())?;
+        let permissions = PermissionManager::new(database.clone());
         let place = PlaceManager::new(place_target)?;
         let roles = RoleManager::new(config.clone(), database.clone(), verifier.clone(),
                                      tasks.clone());
         let discord = DiscordManager::new(config.clone(), core_ref.clone(), roles.clone(),
                                           tasks.clone(), verify_channel.clone(),
-                                          delete_service.clone());
+                                          delete_service.clone(), permissions.clone());
 
         tasks.dispatch_repeating_task(Duration::from_secs(60 * 10), |core| core.cleanup());
 
         Ok(VerifierCore(Arc::new(VerifierCoreData {
             status: AtomicU8::new(STATUS_STOPPED),
             _database: database, _tasks: tasks,
-            config, core_ref, terminal, verifier, discord, place, roles, verify_channel,
+            config, core_ref, terminal, verifier, discord, place, permissions,
+            roles, verify_channel,
         })))
     }
 
@@ -118,6 +125,7 @@ impl VerifierCore {
         debug!("Running garbage collection.");
         self.0.config.on_cleanup_tick();
         self.0.discord.on_cleanup_tick();
+        self.0.permissions.on_cleanup_tick();
         self.0.roles.on_cleanup_tick();
         self.0.verify_channel.on_cleanup_tick();
         self.0.verifier.on_cleanup_tick();
@@ -173,6 +181,9 @@ impl VerifierCore {
 
     pub fn config(&self) -> &ConfigManager {
         &self.0.config
+    }
+    pub fn permissions(&self) -> &PermissionManager {
+        &self.0.permissions
     }
     pub fn roles(&self) -> &RoleManager {
         &self.0.roles

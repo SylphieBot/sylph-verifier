@@ -204,7 +204,6 @@ config_keys! {
     // Discord settings
     CommandPrefix<String>("!".to_owned(), |_, core| core.refresh_place());
     DiscordToken<Option<String>>(None, |_, core| core.discord().reconnect());
-    BotOwnerId<Option<u64>>(None);
 
     // Role management settings
     SetNickname<bool>(true);
@@ -243,6 +242,9 @@ config_keys! {
     AllowReverifyDiscord<bool>(false);
     AllowReverifyRoblox<bool>(false);
     ReverificationCooldownSeconds<u64>(60 * 60 * 24);
+
+    // Internal settings for debugging. These aren't configurable via commands.
+    ProductionMode<bool>(true);
 }
 
 struct ConfigManagerData {

@@ -52,7 +52,7 @@ macro_rules! config_values {
                 $(
                     stringify!($config_name) => {
                         cmd_ensure!(guild.is_none() || $allow_guild,
-                                    "This option cannot be set per-guild.");
+                                    "This option cannot be set per-server.");
                         match value {
                             Some(str) => {
                                 let from_str: fn(&str) -> Result<$tp> = $from_str;
@@ -80,7 +80,7 @@ macro_rules! config_values {
                              if guild.is_some() && !$allow_guild {
                                 " *(This option cannot be overwritten per-server.)*".to_owned()
                              } else {
-                                "".to_owned()
+                                String::new()
                              })?;
                     writeln!(config, "{}{}", align, $help)?;
                 }
@@ -99,11 +99,6 @@ config_values! {
         "The bot token used to connect to Discord.",
         |x|    Ok(Some(x.to_owned())),
         |_, x| Ok(x.map_or("(not set)", |_| "<token redacted>").to_owned()));
-    bot_owner_id<Option<u64>>(
-        BotOwnerId, false, GuildShowType::OnlyInTerminal,
-        "The user ID of the bot's owner. That account can bypass permissions on any server.",
-        |x|    parse_u64(x).map(Some),
-        |_, x| Ok(x.map_or("(not set)".to_string(), |x| format!("{}", x)).to_owned()));
 
     set_nickname<bool>(
         SetNickname, true, GuildShowType::OnlyInGuild,
@@ -218,12 +213,12 @@ fn set(ctx: &CommandContext, guild: Option<GuildId>) -> Result<()> {
 
 crate const COMMANDS: &[Command] = &[
     Command::new("set")
-        .help(Some("<key> [new value]"), "Sets a configuration value for this guild.")
-        .required_permissions(enum_set!(DiscordPermission::ManageGuild))
+        .help(Some("<key> [new value]"), "Sets a configuration value for this server.")
+        .required_permissions(enum_set!(BotPermission::ManageGuildSettings))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec(|ctx| set(ctx, Some(ctx.get_guild()?.unwrap()))),
     Command::new("set_global")
         .help(Some("<key> [new value]"), "Sets a global configuration value.")
-        .terminal_only()
+        .required_permissions(enum_set!(BotPermission::ManageGlobalSetings))
         .exec(|ctx| set(ctx, None)),
 ];
