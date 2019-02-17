@@ -208,6 +208,7 @@ impl TokenContext {
 #[derive(Copy, Clone, Debug)]
 pub enum VerifyResult {
     VerificationOk, TokenAlreadyUsed, VerificationPlaceOutdated, InvalidToken,
+    ReverifyOk { discord_link: Option<UserId>, roblox_link: Option<RobloxUserID> },
     TooManyAttempts { max_attempts: u32, cooldown: u64, cooldown_ends: SystemTime },
     SenderVerifiedAs { other_roblox_id: RobloxUserID },
     RobloxAccountVerifiedTo { other_discord_id: UserId },
@@ -386,11 +387,12 @@ impl Verifier {
             }
         }
 
-        let check_roblox = conn.query(
+        let roblox_link = check_discord.and_then(|x| x.0);
+        let discord_link = conn.query(
             "SELECT discord_user_id FROM discord_user_info \
              WHERE roblox_user_id = ?1", roblox_id,
         ).get_opt::<UserId>()?;
-        if let Some(current_id) = check_roblox {
+        if let Some(current_id) = discord_link {
             // TODO: Add some locking here in case the current_id is verifying currently.
             if current_id != discord_id {
                 if !allow_reverify_roblox {
@@ -420,7 +422,11 @@ impl Verifier {
             Ok(())
         })?;
 
-        Ok(VerifyResult::VerificationOk)
+        if roblox_link.is_some() || discord_link.is_some() {
+            Ok(VerifyResult::ReverifyOk { roblox_link, discord_link })
+        } else {
+            Ok(VerifyResult::VerificationOk)
+        }
     }
     pub fn unverify(&self, discord_id: UserId) -> Result<()> {
         debug!("Starting unverification: discord id {}", discord_id.0);

@@ -40,9 +40,6 @@ config_values! {
     cmd_unverify_other     => UnverifyOther,
     cmd_whois              => Whois,
     cmd_whowas             => Whowas,
-
-    // Logging permissions
-    log_all_verifications  => LogAllVerifications,
 }
 
 fn append_perms(buffer: &mut String, perms: EnumSet<BotPermission>) -> Result<()> {

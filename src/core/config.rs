@@ -243,6 +243,8 @@ config_keys! {
     AllowReverifyRoblox<bool>(false);
     ReverificationCooldownSeconds<u64>(60 * 60 * 24);
 
+    GlobalVerificationLogChannel<Option<u64>>(None);
+
     // Internal settings for debugging. These aren't configurable via commands.
     ProductionMode<bool>(true);
 }

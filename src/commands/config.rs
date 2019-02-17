@@ -192,6 +192,12 @@ config_values! {
         ReverificationCooldownSeconds, false, GuildShowType::OnlyInTerminal,
         "How many seconds a user must wait after verifying before they can reverify.",
         parse_u64, |_, x| Ok(util::to_english_time_precise(x)));
+
+    global_verification_log_channel<Option<u64>>(
+        GlobalVerificationLogChannel, false, GuildShowType::OnlyInTerminal,
+        "The channel to globally log verification information to.",
+        |x| parse_u64(x).map(Some),
+        |_, x| Ok(x.map_or_else(|| "*(none set)*".to_owned(), |x| format!("{}", x))));
 }
 
 fn set(ctx: &CommandContext, guild: Option<GuildId>) -> Result<()> {

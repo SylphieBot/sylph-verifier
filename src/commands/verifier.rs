@@ -70,39 +70,72 @@ fn do_verify(ctx: &CommandContext, _: &Context, msg: &Message) -> Result<()> {
     let discord_username = msg.author.tag();
     let discord_id = msg.author.id;
 
+    let discord_display = format!("{} (`{}`)", discord_username, discord_id.0);
+    let roblox_display = format!("`{}` (https://www.roblox.com/users/{}/profile)",
+                                 roblox_username, roblox_id.0);
+
     let guild_id = msg.guild_id?;
 
-    debug!("Beginning verification attempt: {} -> {}", discord_username, roblox_username);
+    debug!("Beginning verification attempt: {} -> {}", discord_display, roblox_display);
 
+    let log_channel = ctx.core.config().get(None, ConfigKeys::GlobalVerificationLogChannel)?;
+    macro_rules! verify_status {
+        ($prefix_log:expr, $($format:tt)*) => {
+            let buffer = format!($($format)*);
+            info!("{}", buffer);
+            if let Some(log_channel_id) = log_channel {
+                let log_channel_id = ChannelId(log_channel_id);
+                log_channel_id.send_message(|m|
+                    m.content(format_args!(concat!("`[{}]` ", $prefix_log, "{}"),
+                                           Utc::now().format("%H:%M:%S"), buffer))
+                )?;
+            }
+        }
+    }
     match ctx.core.verifier().try_verify(discord_id, roblox_id, token)? {
         VerifyResult::VerificationOk => {
-            info!("{} successfully verified as {}",
-                  discord_username, roblox_username);
-            let status = ctx.core.roles().assign_roles(guild_id, msg.author.id, Some(roblox_id))?;
-            ctx.respond(verify_status_str(ctx.prefix(), status))?;
-            Ok(())
+            verify_status!("ℹ ", "{} successfully verified as {}",
+                           discord_display, roblox_display);
+        }
+        VerifyResult::ReverifyOk { discord_link, roblox_link } => {
+            let discord_link_display = if let Some(discord_id) = discord_link {
+                let discord_username = discord_id.to_user()?.tag();
+                format!("Old Discord account: {} (`{}`)", discord_username, discord_id.0)
+            } else {
+                format!("No old Discord account")
+            };
+            let roblox_link_display = if let Some(roblox_id) = roblox_link {
+                let roblox_username = roblox_id.lookup_username()?;
+                format!("Old Roblox account: `{}` (https://www.roblox.com/users/{}/profile)",
+                        roblox_username, roblox_id.0)
+            } else {
+                format!("No old Roblox account")
+            };
+            verify_status!("⚠ ", "{} successfully reverified as {}\n{}; {}",
+                           discord_display, roblox_display,
+                           discord_link_display, roblox_link_display);
         }
         VerifyResult::TokenAlreadyUsed => {
-            info!("{} failed to verify as {}: Token already used.",
-                  discord_username, roblox_username);
+            verify_status!("🛑 ", "{} failed to verify as {}: Token already used.",
+                           discord_display, roblox_display);
             cmd_error!("Someone has already used that verification code. Please wait for a \
                         new code to be generated, then try again.")
         }
         VerifyResult::VerificationPlaceOutdated => {
-            info!("{} failed to verify as {}: Outdated verification place.",
-                  discord_username, roblox_username);
+            verify_status!("⚠⚠⚠⚠⚠ ", "{} failed to verify as {}: Outdated verification place.",
+                           discord_display, roblox_display);
             cmd_error!("The verification place is outdated, and has not been updated with the \
                         verification bot. Please contact the bot owner.")
         }
         VerifyResult::InvalidToken => {
-            info!("{} failed to verify as {}: Invalid token.",
-                  discord_username, roblox_username);
+            verify_status!("🛑 ", "{} failed to verify as {}: Invalid token.",
+                           discord_display, roblox_display);
             cmd_error!("The verification code you used is not valid. Please check the code \
                         you entered and try again.")
         }
         VerifyResult::TooManyAttempts { max_attempts, cooldown, cooldown_ends } => {
-            info!("{} failed to verify as {}: Too many attempts.",
-                  discord_username, roblox_username);
+            verify_status!("🛑 ", "{} failed to verify as {}: Too many attempts.",
+                           discord_display, roblox_display);
             cmd_error!("You can only try to verify {} times every {}. \
                         Please try again in {}.{}",
                        max_attempts, util::to_english_time(cooldown),
@@ -111,27 +144,31 @@ fn do_verify(ctx: &CommandContext, _: &Context, msg: &Message) -> Result<()> {
         }
         VerifyResult::SenderVerifiedAs { other_roblox_id } => {
             let other_roblox_username = other_roblox_id.lookup_username()?;
-            info!("{} failed to verify as {}: Already verified as {}.",
-                  discord_username, roblox_username, other_roblox_username);
+            verify_status!("🛑 ", "{} failed to verify as {}: Already verified as {}.",
+                           discord_display, roblox_display, other_roblox_username);
             cmd_error!("You are already verified as {}.{}",
                        other_roblox_username, reverify_help(ctx, discord_id, roblox_id)?)
         }
         VerifyResult::RobloxAccountVerifiedTo { other_discord_id } => {
             let other_discord_username = get_discord_username(other_discord_id);
-            info!("{} failed to verify as {}: Roblox account already verified to {}.",
-                  discord_username, roblox_username, other_discord_username);
+            verify_status!("🛑 ", "{} failed to verify as {}: Roblox account already verified to {}.",
+                           discord_display, roblox_display, other_discord_username);
             cmd_error!("{} has already verified as {}.",
                        other_discord_username, roblox_username)
         }
         VerifyResult::ReverifyOnCooldown { cooldown, cooldown_ends } => {
-            info!("{} failed to verify as {}: Reverified too soon.",
-                  discord_username, roblox_username);
+            verify_status!("🛑 ", "{} failed to verify as {}: Reverified too soon.",
+                           discord_display, roblox_display);
             cmd_error!("You can only reverify once every {}. Please try again in {}.{}",
                        util::to_english_time(cooldown),
                        util::english_time_diff(SystemTime::now(), cooldown_ends),
                        reverify_help(ctx, discord_id, roblox_id)?)
         }
     }
+
+    let status = ctx.core.roles().assign_roles(guild_id, msg.author.id, Some(roblox_id))?;
+    ctx.respond(verify_status_str(ctx.prefix(), status))?;
+    Ok(())
 }
 
 fn check_configuration(ctx: &CommandContext, guild_id: GuildId) -> Result<()> {
@@ -146,7 +183,7 @@ fn check_configuration(ctx: &CommandContext, guild_id: GuildId) -> Result<()> {
 fn whois_msg(
     ctx: &CommandContext, user: User, roblox_id: RobloxUserID, roblox_name: &str
 ) -> Result<()> {
-    ctx.respond(format!("{} (#{}) is verified as {} (https://www.roblox.com/users/{}/profile)",
+    ctx.respond(format!("{} (`{}`) is verified as {} (https://www.roblox.com/users/{}/profile)",
                         user.tag(), user.id.0, roblox_name, roblox_id.0))
 }
 fn whois_discord(ctx: &CommandContext, discord_user_id: UserId) -> Result<()> {
@@ -158,12 +195,12 @@ fn whois_discord(ctx: &CommandContext, discord_user_id: UserId) -> Result<()> {
         if let Some(roblox_name) = roblox_name {
             whois_msg(ctx, user, roblox_user_id, &roblox_name)
         } else {
-            cmd_error!("{} (#{}) is verified as Roblox User ID #{}, which no longer exists. \
+            cmd_error!("{} (`{}`) is verified as Roblox User ID #{}, which no longer exists. \
                         (https://www.roblox.com/users/{}/profile)",
                        user.tag(), user.id.0, roblox_user_id.0, roblox_user_id.0)
         }
     } else {
-        cmd_error!("{} (#{}) isn't verified.", user.tag(), user.id.0)
+        cmd_error!("{} (`{}`) isn't verified.", user.tag(), user.id.0)
     }
 }
 fn whois_roblox(ctx: &CommandContext, roblox_name: &str) -> Result<()> {

@@ -49,9 +49,6 @@ enum_set_type! {
 
         // Command permissions
         Unverify, UnverifyOther, Whois, Whowas,
-
-        // Logging permissions
-        LogAllVerifications,
     }
 }
 
@@ -60,11 +57,11 @@ use self::BotPermission::*;
 const ALWAYS_GLOBAL_GUILD: EnumSet<BotPermission> =
     enum_set!(GuildAdmin | ManageGuildSettings | ManageRoles);
 const DEFAULT_GLOBAL_ALL_GUILDS: EnumSet<BotPermission> =
-    enum_set!(LogAllVerifications);
+    enum_set!();
 const DEFAULT_GLOBAL_ALL_USERS: EnumSet<BotPermission> =
     enum_set!(Unverify | Whois | Whowas);
 const GUILD_ONLY: EnumSet<BotPermission> =
-    enum_set!(LogAllVerifications);
+    enum_set!();
 
 pub struct PermissionManagerData {
     database: Database, scope_cache: ConcurrentCache<Scope, EnumSet<BotPermission>>,
