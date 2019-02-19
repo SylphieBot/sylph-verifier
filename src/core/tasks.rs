@@ -4,6 +4,7 @@ use error_report;
 use num_cpus;
 use parking_lot::Mutex;
 use std::boxed::FnBox;
+use std::cmp::max;
 use std::mem::{uninitialized, drop};
 use std::ptr;
 use std::sync::Arc;
@@ -41,7 +42,8 @@ impl TaskManager {
         };
         let tasks = TaskManager(Arc::new(TaskManagerData {
             core_ref,
-            pool: Mutex::new(ThreadPool::with_name("task thread".to_string(), num_cpus::get())),
+            pool: Mutex::new(ThreadPool::with_name("task thread".to_string(),
+                                                   max(num_cpus::get() * 4, 16))),
             timer_ring: Mutex::new(TimerRing { slots, cur_pos: 0, }),
         }));
         {
