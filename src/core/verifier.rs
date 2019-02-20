@@ -444,9 +444,10 @@ impl Verifier {
             let conn = self.0.database.connect()?;
             conn.transaction(|| {
                 conn.execute(
-                    "REPLACE INTO discord_user_info (\
-                         discord_user_id, roblox_user_id, last_updated\
-                     ) VALUES (?1, null, ?2)", (discord_id, SystemTime::now()),
+                    "UPDATE discord_user_info \
+                     SET roblox_user_id = NULL \
+                     WHERE discord_user_id = ?1",
+                    discord_id,
                 )?;
                 conn.execute(
                     "INSERT INTO user_history (\
