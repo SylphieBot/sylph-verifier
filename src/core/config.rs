@@ -218,9 +218,9 @@ config_keys! {
     // Verification place settings
     PlaceUITitle<String>("Roblox Account Verifier".to_owned(), |_, core| core.refresh_place());
     PlaceUIInstructions<String>(
-        "To verify your Roblox account with this server, please enter the following \
-         command on it.".to_owned(),
-         |_, core| core.refresh_place());
+        "To verify your Roblox account, please enter the following command into the \
+         verification channel:".to_owned(),
+        |_, core| core.refresh_place());
     PlaceUIBackground<Option<String>>(None, |_, core| core.refresh_place());
     PlaceID<Option<u64>>(None, |guild, core| core.verify_channel().update(guild));
 
