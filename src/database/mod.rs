@@ -103,8 +103,7 @@ impl <'a, 'b> Row<'a, 'b> {
     }
 
     pub fn get<T : FromSql>(&self, i: usize) -> Result<T> {
-        ensure!(i <= i32::max_value() as usize, "index out of range!");
-        Ok(self.0.get_checked::<i32, FromSqlWrapper<T>>(i as i32)?.0)
+        Ok(self.0.get_checked::<usize, FromSqlWrapper<T>>(i)?.0)
     }
 }
 
@@ -252,7 +251,7 @@ impl DatabaseConnection {
     }
 
     pub fn checkpoint(&self) -> Result<()> {
-        self.conn.query_row("PRAGMA wal_checkpoint(RESTART)", &[], |_| ())?;
+        self.conn.execute_batch("PRAGMA wal_checkpoint(RESTART)")?;
         Ok(())
     }
 }

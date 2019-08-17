@@ -135,12 +135,12 @@ impl <'a, T: ToSql + ?Sized> ToSql for &'a T {
 }
 impl ToSql for u64 {
     fn to_sql(&self) -> Result<ToSqlOutput> {
-        Ok(Value::Integer(*self as i64).into())
+        Ok((*self as i64).into())
     }
 }
 impl ToSql for usize {
     fn to_sql(&self) -> Result<ToSqlOutput> {
-        Ok(Value::Integer(*self as i64).into())
+        Ok((*self as i64).into())
     }
 }
 impl ToSql for ChannelId {
@@ -175,7 +175,7 @@ impl ToSql for RobloxUserID {
 }
 impl ToSql for SystemTime {
     fn to_sql(&self) -> Result<ToSqlOutput> {
-        Ok(Value::Integer(util::time_to_i64(*self)).into())
+        Ok(util::time_to_i64(*self).into())
     }
 }
 impl ToSql for Value {

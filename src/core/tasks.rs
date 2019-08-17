@@ -3,7 +3,6 @@ use errors::*;
 use error_report;
 use num_cpus;
 use parking_lot::Mutex;
-use std::boxed::FnBox;
 use std::cmp::max;
 use std::mem::{uninitialized, drop};
 use std::ptr;
@@ -16,7 +15,7 @@ use threadpool::ThreadPool;
 const MAX_SECS: usize = 4096; // 68 minutes
 
 enum Task {
-    NormalTask(Box<dyn FnBox(&VerifierCore) -> Result<()> + Send + 'static>),
+    NormalTask(Box<dyn FnOnce(&VerifierCore) -> Result<()> + Send + 'static>),
     RepeatingTask(Arc<dyn Fn(&VerifierCore) -> Result<()> + Sync + Send + 'static>, usize),
 }
 struct TaskList {
@@ -60,7 +59,7 @@ impl TaskManager {
                     while let Some(cur_slot) = slot {
                         match cur_slot.task {
                             Task::NormalTask(task) =>
-                                tasks.dispatch_task(|core| FnBox::call_box(task, (core,))),
+                                tasks.dispatch_task(|core| task(core)),
                             Task::RepeatingTask(task, period_secs) => {
                                 {
                                     let task = task.clone();
@@ -105,7 +104,7 @@ impl TaskManager {
         assert!(duration_secs as usize <= MAX_SECS);
         let f = Box::new(f);
         if duration_secs == 0 {
-            self.dispatch_task(move |core| FnBox::call_box(f, (core,)));
+            self.dispatch_task(move |core| f(core));
         } else {
             self.push_to_ring(Task::NormalTask(f), duration_secs as usize);
         }
