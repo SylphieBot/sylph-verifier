@@ -8,11 +8,7 @@ const DEFAULT_RULE_DEFS: &[(&str, &str)] = &[
     ("Verified", "true"),
     ("Banned", "is_banned()"),
     ("NotBanned", "not is_banned()"),
-    ("FormerBC", "builtin_rule(NotBC) and badge(Welcome To The Club)"),
-    ("NotBC", "not builtin_rule(BC) and not builtin_rule(TBC) and not builtin_rule(OBC)"),
-    ("BC", "badge(Builders Club)"),
-    ("TBC", "badge(Turbo Builders Club)"),
-    ("OBC", "badge(Outrageous Builders Club)"),
+    ("Premium", "has_premium()"),
     ("DevForum", "dev_trust_level(2+)"),
     ("RobloxAdmin", "badge(Administrator) or group(1200769)"),
     // TODO: Allow using rank names
@@ -189,6 +185,7 @@ enum RuleOp {
     CheckInGroup(u64, Option<Condition>),
     CheckDevTrustLevel(Condition),
     CheckIsBanned,
+    CheckHasPremium,
 }
 impl RuleOp {
     fn stack_change(&self) -> isize {
@@ -206,6 +203,7 @@ impl RuleOp {
             RuleOp::CheckInGroup(_, _)         =>  1,
             RuleOp::CheckDevTrustLevel(_)      =>  1,
             RuleOp::CheckIsBanned              =>  1,
+            RuleOp::CheckHasPremium =>  1,
         }
     }
 }
@@ -248,6 +246,10 @@ fn parse_term(start: &str, body: &str) -> Result<RuleOp> {
         "is_banned" => {
             ensure!(body == "", "is_banned takes no parameters.");
             Ok(RuleOp::CheckIsBanned)
+        }
+        "has_premium" => {
+            ensure!(body == "", "has_premium takes no parameters.");
+            Ok(RuleOp::CheckHasPremium)
         }
         _ => cmd_error!("Unknown term {}({})", start, body),
     }
@@ -437,7 +439,7 @@ impl <T> ValueCache<T> {
 
 struct VerificationContext {
     user_id: RobloxUserID,
-    is_banned: ValueCache<bool>, dev_trust_level: ValueCache<Option<u32>>,
+    profile: ValueCache<api::WebProfileInfo>, dev_trust_level: ValueCache<Option<u32>>,
     badges: ValueCache<HashSet<String>>, groups: ValueCache<HashMap<u64, u32>>,
     player_badges: HashMap<u64, RuleResult>, owns_asset: HashMap<u64, RuleResult>,
 }
@@ -445,7 +447,7 @@ impl VerificationContext {
     fn new(user_id: RobloxUserID) -> VerificationContext {
         VerificationContext {
             user_id,
-            is_banned: ValueCache::new(), dev_trust_level: ValueCache::new(),
+            profile: ValueCache::new(), dev_trust_level: ValueCache::new(),
             badges: ValueCache::new(), groups: ValueCache::new(),
             player_badges: HashMap::new(), owns_asset: HashMap::new(),
         }
@@ -453,7 +455,11 @@ impl VerificationContext {
 
     fn check_is_banned(&mut self) -> RuleResult {
         let id = self.user_id;
-        self.is_banned.get_cached(|| api::web_profile_exists(id), |x| *x)
+        self.profile.get_cached(|| api::get_web_profile(id), |x| x.profile_exists)
+    }
+    fn check_has_premium(&mut self) -> RuleResult {
+        let id = self.user_id;
+        self.profile.get_cached(|| api::get_web_profile(id), |x| x.has_premium)
     }
     fn check_has_trust_level(&mut self, condition: Condition) -> RuleResult {
         let id = self.user_id;
@@ -714,6 +720,7 @@ impl VerificationSet {
                 RuleOp::CheckInGroup(group, rank) => state.push(ctx.check_is_in_group(group, rank)),
                 RuleOp::CheckDevTrustLevel(check) => state.push(ctx.check_has_trust_level(check)),
                 RuleOp::CheckIsBanned => state.push(ctx.check_is_banned()),
+                RuleOp::CheckHasPremium => state.push(ctx.check_has_premium()),
             }
             ip += 1;
         }

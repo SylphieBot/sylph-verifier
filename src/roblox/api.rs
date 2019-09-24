@@ -3,6 +3,7 @@ use percent_encoding::{percent_encode, QUERY_ENCODE_SET};
 use reqwest;
 use reqwest::StatusCode;
 use roblox::*;
+use scraper::{Html, Selector};
 use serde_json;
 use std::collections::{HashSet, HashMap};
 
@@ -38,15 +39,43 @@ struct RobloxGroupLookup {
     #[serde(rename = "Rank")] rank: u32,
 }
 
-crate fn web_profile_exists(id: RobloxUserID) -> Result<bool> {
+crate struct WebProfileInfo {
+    crate profile_exists: bool,
+    crate has_premium: bool,
+}
+
+crate fn get_web_profile(id: RobloxUserID) -> Result<WebProfileInfo> {
     let uri = format!("https://www.roblox.com/users/{}/profile", id.0);
     let response = reqwest::get(&uri)?;
-    let response = if response.status() != StatusCode::NOT_FOUND {
+    let mut response = if response.status() != StatusCode::NOT_FOUND {
         response.error_for_status()?
     } else {
         response
     };
-    Ok(response.url().as_str() == "https://www.roblox.com/request-error?code=404")
+
+    let mut info = WebProfileInfo {
+        profile_exists: false,
+        has_premium: false
+    };
+    if response.url().as_str() == "https://www.roblox.com/request-error?code=404" {
+        info.profile_exists = true;
+    } else {
+        let document = Html::parse_document(&response.text()?);
+        lazy_static! {
+            static ref SELECTOR_PREMIUM_MEDIUM: Selector =
+                Selector::parse(".icon-premium-medium").unwrap();
+            static ref SELECTOR_PREMIUM_SMALL: Selector =
+                Selector::parse(".icon-premium-small").unwrap();
+        }
+
+        let has_medium = document.select(&*SELECTOR_PREMIUM_MEDIUM).next().is_some();
+        let has_small = document.select(&*SELECTOR_PREMIUM_SMALL).next().is_some();
+        if has_medium || has_small {
+            info.has_premium = true;
+        }
+
+    }
+    Ok(info)
 }
 
 crate fn for_username(name: &str) -> Result<Option<RobloxUserID>> {
