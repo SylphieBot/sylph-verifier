@@ -26,6 +26,8 @@ static LOG_POLICY: &'static [LogPolicy] = &[
     LogPolicy::new("hyper"         , LevelFilter::Info, LevelFilter::Info),
     LogPolicy::new("tokio_core"    , LevelFilter::Info, LevelFilter::Info),
     LogPolicy::new("tokio_reactor" , LevelFilter::Info, LevelFilter::Info),
+    LogPolicy::new("html5ever"     , LevelFilter::Info, LevelFilter::Info),
+    LogPolicy::new("selectors"     , LevelFilter::Info, LevelFilter::Info),
     LogPolicy::new("*"             , LevelFilter::Info, LevelFilter::Debug),
 ];
 
