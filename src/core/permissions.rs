@@ -36,20 +36,19 @@ impl Scope {
 
 // This enum's order is reflected in the database format!
 // Replace permissions with dummy values rather than removing them.
-enum_set_type! {
-    pub enum BotPermission {
-        // Bypass permissions
-        BotAdmin, GuildAdmin,
+#[derive(EnumSetType)]
+pub enum BotPermission {
+    // Bypass permissions
+    BotAdmin, GuildAdmin,
 
-        // Global permissions
-        ManageBot, ManageGlobalSetings, ManageVerification,
+    // Global permissions
+    ManageBot, ManageGlobalSetings, ManageVerification,
 
-        // Guild permissions
-        BypassHierarchy, ManageGuildSettings, ManageRoles,
+    // Guild permissions
+    BypassHierarchy, ManageGuildSettings, ManageRoles,
 
-        // Command permissions
-        Unverify, UnverifyOther, Whois, Whowas,
-    }
+    // Command permissions
+    Unverify, UnverifyOther, Whois, Whowas,
 }
 
 use self::BotPermission::*;

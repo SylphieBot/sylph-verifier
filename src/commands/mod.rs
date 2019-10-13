@@ -27,10 +27,9 @@ impl CommandFn {
     }
 }
 
-enum_set_type! {
-    pub enum CommandTarget {
-        Terminal, ServerMessage, PrivateMessage,
-    }
+#[derive(EnumSetType)]
+pub enum CommandTarget {
+    Terminal, ServerMessage, PrivateMessage,
 }
 
 pub struct Command {

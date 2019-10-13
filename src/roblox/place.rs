@@ -401,12 +401,14 @@ pub fn create_place_file(overwrite_template: Option<&[u8]>,
             ("ModuleScript", "server_secure_config", "ScriptGuid") => {
                 trace!("Changing server configuration UUID.");
                 server_secure_config_uuid = true;
-                Some(format!("{{{}}}", Uuid::new_v5(&CONFIG_UUID_NAMESPACE, &server_config)))
+                Some(format!("{{{}}}",
+                             Uuid::new_v5(&CONFIG_UUID_NAMESPACE, server_config.as_bytes())))
             }
             ("ModuleScript", "client_config", "ScriptGuid") => {
                 trace!("Changing client configuration UUID.");
                 client_secure_config_uuid = true;
-                Some(format!("{{{}}}", Uuid::new_v5(&CONFIG_UUID_NAMESPACE, &client_config)))
+                Some(format!("{{{}}}",
+                             Uuid::new_v5(&CONFIG_UUID_NAMESPACE, server_config.as_bytes())))
             }
             ("TextLabel", "TemplateMessage", "Text") => {
                 trace!("Removing template message.");

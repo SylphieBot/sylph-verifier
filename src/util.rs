@@ -1,5 +1,7 @@
 use errors::*;
-use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{
+    Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, MappedRwLockReadGuard, MappedRwLockWriteGuard,
+};
 use reqwest;
 use serenity::model::prelude::*;
 use std::borrow::Borrow;
@@ -110,7 +112,7 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
         }
     }
 
-    pub fn read(&self, k: &K) -> Result<RwLockReadGuard<V>> {
+    pub fn read(&self, k: &K) -> Result<MappedRwLockReadGuard<V>> {
         loop {
             let read = self.data.read();
             if read.contains_key(k) {
@@ -125,7 +127,7 @@ impl <K: Clone + Eq + Hash + Sync, V: Sync> ConcurrentCache<K, V> {
             }
         }
     }
-    pub fn write(&self, k: &K) -> Result<RwLockWriteGuard<V>> {
+    pub fn write(&self, k: &K) -> Result<MappedRwLockWriteGuard<V>> {
         let write = self.data.write();
         if write.contains_key(k) {
             Ok(RwLockWriteGuard::map(write, |x| x.get_mut(k).unwrap()))
