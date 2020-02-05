@@ -51,13 +51,11 @@ uuid = { version = "0.7", features = ["v5"] }
 
 [dependencies.r2d2]
 version = "0.8.5"
-git = "https://github.com/sfackler/r2d2.git"
-rev = "8d973d946bd94fb2054a7312e86668314432fb96"
 
 [dependencies.serenity]
 version = "0.5.9"
 git = "https://github.com/Lymia/serenity.git"
-rev = "c1166980628e9fd3ee9ee3d3093754a9b9511c03"
+rev = "6e8722fa4884b35783c59f279ad89e2285ddd762"
 default-features = false
 features = ["cache", "client", "model"]
 

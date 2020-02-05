@@ -245,7 +245,7 @@ fn do_whois(ctx: &CommandContext) -> Result<()> {
 
 fn format_discord_id(id: UserId) -> String {
     match id.to_user() {
-        Ok(user) => user.tag(),
+        Ok(user) => format!("{} (`{}`)", user.tag(), id.0),
         Err(_) => format!("*(non-existent Discord id #{})*", id.0),
     }
 }
