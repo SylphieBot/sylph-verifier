@@ -107,7 +107,7 @@ impl VerificationChannelManager {
         if let Some(place_id) = self.0.config.get(None, ConfigKeys::PlaceID)? {
             Ok(format!("To verify your Roblox account with your Discord account, please \
                         follow these instructions:\n\
-                        • Join the place at <https://roblox.com/--place?id={}> using the account \
+                        • Join the place at <https://roblox.com/games/{}> using the account \
                           you want to verify as.\n\
                         • Type the command it shows in the oval box into this channel.",
                        place_id))
