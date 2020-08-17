@@ -170,8 +170,8 @@ pub fn sprunge(text: &str) -> Result<String> {
     let mut params = HashMap::new();
     params.insert("sprunge", text);
 
-    let client = reqwest::Client::new();
-    let mut result = client.post("http://sprunge.us/").form(&params).send()?.error_for_status()?;
+    let client = reqwest::blocking::Client::new();
+    let result = client.post("http://sprunge.us/").form(&params).send()?.error_for_status()?;
     Ok(result.text()?.trim().to_string())
 }
 

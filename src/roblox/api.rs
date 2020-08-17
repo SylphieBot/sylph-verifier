@@ -1,6 +1,6 @@
 use errors::*;
 use percent_encoding::{percent_encode, QUERY_ENCODE_SET};
-use reqwest;
+use reqwest::blocking;
 use reqwest::header;
 use reqwest::StatusCode;
 use roblox::*;
@@ -45,20 +45,20 @@ crate struct WebProfileInfo {
     crate has_premium: bool,
 }
 
-fn get_api_endpoint(uri: &str) -> Result<reqwest::Response> {
+fn get_api_endpoint(uri: &str) -> Result<blocking::Response> {
     let mut headers = header::HeaderMap::new();
     let agent = concat!(
         "SylphVerifierBot/", env!("CARGO_PKG_VERSION"), " (+https://github.com/SylphieBot/sylph-verifier)"
     );
     headers.insert(header::USER_AGENT, header::HeaderValue::from_static(agent));
-    let client = reqwest::Client::builder().default_headers(headers).build()?;
+    let client = blocking::Client::builder().default_headers(headers).build()?;
     Ok(client.get(uri).send()?)
 }
 
 crate fn get_web_profile(id: RobloxUserID) -> Result<WebProfileInfo> {
     let uri = format!("https://www.roblox.com/users/{}/profile", id.0);
     let response = get_api_endpoint(&uri)?;
-    let mut response = if response.status() != StatusCode::NOT_FOUND {
+    let response = if response.status() != StatusCode::NOT_FOUND {
         response.error_for_status()?
     } else {
         response
@@ -107,7 +107,7 @@ crate fn lookup_username(id: RobloxUserID) -> Result<Option<String>> {
 crate fn get_dev_trust_level(name: &str) -> Result<Option<u32>> {
     let uri = format!("https://devforum.roblox.com/users/{}.json",
                       percent_encode(name.as_bytes(), QUERY_ENCODE_SET));
-    let mut request = get_api_endpoint(&uri)?;
+    let request = get_api_endpoint(&uri)?;
     if request.status().is_success() {
         let lookup = serde_json::from_str::<RobloxDevForumLookup>(&request.text()?)?;
         Ok(Some(lookup.user.trust_level))

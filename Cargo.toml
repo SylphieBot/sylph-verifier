@@ -24,10 +24,10 @@ backtrace = "0.3"
 byteorder = "1.1"
 chrono = "0.4"
 constant_time_eq = "0.1"
-enumset = { version = "0.4", features = ["nightly"] }
+enumset = "1.0"
 failure = { version = "1.0", git = "https://github.com/withoutboats/failure.git", features = ["backtrace"] }
 fs2 = "0.4"
-hmac = "0.7"
+hmac = "0.9"
 hyper = "0.10"
 lazy_static = "1.0"
 libc = "0.2"
@@ -35,19 +35,19 @@ linefeed = "0.5"
 log = "0.4"
 lz4-sys = "1.8"
 num_cpus = "1.0"
-parking_lot = { version = "0.9", features = ["nightly", "deadlock_detection"] }
+parking_lot = { version = "0.11", features = ["nightly", "deadlock_detection"] }
 percent-encoding = "1.0"
-rand = "0.5"
+rand = "0.7"
 regex = "1.0"
-reqwest = "0.9"
-rusqlite = { version = "0.14", features = ["bundled"] }
-scraper = "0.11"
+reqwest = { version = "0.10", features = ["blocking"] }
+rusqlite = { version = "0.23", features = ["bundled"] }
+scraper = "0.12"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
-sha2 = "0.8"
+sha2 = "0.9"
 threadpool = "1.0"
-uuid = { version = "0.7", features = ["v5"] }
+uuid = { version = "0.8", features = ["v5"] }
 
 [dependencies.r2d2]
 version = "0.8.5"
@@ -55,7 +55,7 @@ version = "0.8.5"
 [dependencies.serenity]
 version = "0.5.9"
 git = "https://github.com/Lymia/serenity.git"
-rev = "6e8722fa4884b35783c59f279ad89e2285ddd762"
+rev = "bfc12d24d8b2dbac00edc93f5c4bb1a531b8cc7e"
 default-features = false
 features = ["cache", "client", "model"]
 

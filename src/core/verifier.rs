@@ -2,9 +2,9 @@ use constant_time_eq::constant_time_eq;
 use core::config::*;
 use database::*;
 use errors::*;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, Mac, NewMac};
 use parking_lot::RwLock;
-use rand::{RngCore, OsRng};
+use rand::{RngCore, rngs::OsRng};
 use roblox::*;
 use serenity::model::prelude::*;
 use sha2::Sha256;
@@ -73,9 +73,9 @@ impl TokenParameters {
 
     fn sha256_token(&self, data: &str) -> Token {
         let mut mac = Hmac::<Sha256>::new_varkey(&self.key).unwrap();
-        mac.input(data.as_bytes());
-        let result = mac.result();
-        let code = result.code();
+        mac.update(data.as_bytes());
+        let result = mac.finalize();
+        let code = result.into_bytes();
 
         let mut accum = 0;
         for i in 0..6 {
@@ -145,10 +145,9 @@ impl TokenContext {
         }
     }
     fn new_in_db(conn: &DatabaseConnection, time_increment: u32) -> Result<TokenContext> {
-        let mut rng = OsRng::new()?;
         let mut key = Vec::new();
         for _ in 0..16 {
-            let r = rng.next_u32();
+            let r = OsRng.next_u32();
             key.push((r >>  0) as u8);
             key.push((r >>  8) as u8);
             key.push((r >> 16) as u8);

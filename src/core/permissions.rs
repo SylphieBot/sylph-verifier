@@ -91,7 +91,7 @@ impl PermissionManager {
             Scope::GlobalAllGuilds => DEFAULT_GLOBAL_ALL_GUILDS,
             Scope::GlobalAllUsers => DEFAULT_GLOBAL_ALL_USERS,
             _ => EnumSet::empty(),
-        }, |bits| EnumSet::from_bits(bits as u128)))
+        }, |bits| EnumSet::from_u64(bits)))
     }
 
     pub fn get_scope(&self, scope: Scope) -> Result<EnumSet<BotPermission>> {
@@ -105,7 +105,7 @@ impl PermissionManager {
             "REPLACE INTO permissions (\
                 scope_1, scope_2, id, permission_bits\
             ) VALUES (?1, ?2, ?3, ?4)",
-            (scope_1, scope_2, id, permissions.to_bits() as u64),
+            (scope_1, scope_2, id, permissions.as_u64()),
         )?;
         *self.0.scope_cache.write(&scope)? = permissions;
         Ok(())

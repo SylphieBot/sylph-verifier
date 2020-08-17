@@ -48,15 +48,15 @@ struct RowsWrapper<'a>(Rows<'a>);
 impl <'a> RowsWrapper<'a> {
     fn get_all<T: FromSqlRow>(&mut self) -> Result<Vec<T>> {
         let mut vec = Vec::new();
-        while let Some(r) = self.0.next() {
-            vec.push(T::from_sql_row(Row(r?))?);
+        while let Some(r) = self.0.next()? {
+            vec.push(T::from_sql_row(Row(r))?);
         }
         Ok(vec)
     }
 
     fn get_opt<T: FromSqlRow>(&mut self) -> Result<Option<T>> {
-        match self.0.next() {
-            Some(r) => Ok(Some(T::from_sql_row(Row(r?))?)),
+        match self.0.next()? {
+            Some(r) => Ok(Some(T::from_sql_row(Row(r))?)),
             None => Ok(None),
         }
     }
@@ -96,14 +96,14 @@ impl <'a, 'b, T: ToSqlArgs> QueryDSL<'a, 'b, T> {
     }
 }
 
-pub struct Row<'a, 'b>(RusqliteRow<'a, 'b>);
+pub struct Row<'a, 'b>(&'b RusqliteRow<'a>);
 impl <'a, 'b> Row<'a, 'b> {
     pub fn len(&self) -> usize {
         self.0.column_count() as usize
     }
 
     pub fn get<T : FromSql>(&self, i: usize) -> Result<T> {
-        Ok(self.0.get_checked::<usize, FromSqlWrapper<T>>(i)?.0)
+        Ok(self.0.get::<usize, FromSqlWrapper<T>>(i)?.0)
     }
 }
 
@@ -149,7 +149,7 @@ impl ManageConnection for ConnectionManager {
             // Random RuqliteError variant.
             return Err(RusqliteError::QueryReturnedNoRows)
         }
-        conn.prepare_cached("SELECT 1")?.query_row(&[], |_| ())?;
+        conn.prepare_cached("SELECT 1")?.query(&[] as &[u32])?.next()?;
         Ok(())
     }
     fn has_broken(&self, conn: &mut SqliteConnection) -> bool {
@@ -194,6 +194,7 @@ impl DatabaseConnection {
                 TransactionBehavior::Deferred  => "BEGIN DEFERRED",
                 TransactionBehavior::Immediate => "BEGIN IMMEDIATE",
                 TransactionBehavior::Exclusive => "BEGIN EXCLUSIVE",
+                _ => todo!("New transaction behavior added."),
             };
             self.execute(sql, ())?;
             let _depth = TransactionDepthGuard::increment(self);
