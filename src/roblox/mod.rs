@@ -12,7 +12,7 @@ impl RobloxUserID {
     pub fn for_username(name: &str) -> ::errors::Result<RobloxUserID> {
         match api::for_username(name)? {
             Some(id) => Ok(id),
-            None => cmd_error!("No Roblox user named '{}' found.", name),
+            None => cmd_error!("No Roblox user named that was found."),
         }
     }
 
