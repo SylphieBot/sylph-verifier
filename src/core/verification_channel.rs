@@ -109,7 +109,8 @@ impl VerificationChannelManager {
                         follow these instructions:\n\
                         • Join the place at <https://roblox.com/games/{}> using the account \
                           you want to verify as.\n\
-                        • Type the command it shows in the oval box into this channel.",
+                        • Copy the command it shows in the oval box into this channel. It should \
+                          look something like `!verify YourUsername ABCDEF`.",
                        place_id))
         } else {
             error!("No place ID set! Please upload the place file to Roblox, and use \
