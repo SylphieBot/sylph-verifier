@@ -175,6 +175,23 @@ pub fn sprunge(text: &str) -> Result<String> {
     Ok(result.text()?.trim().to_string())
 }
 
+pub fn ensure_member_exists(guild_id: GuildId, user: UserId) -> Result<()> {
+    let guild_lock = guild_id.to_guild_cached()?;
+    let guild = guild_lock.read();
+
+    if !guild.members.contains_key(&user) {
+        std::mem::drop(guild);
+
+        let new_member = guild_id.member(user)?;
+        let mut guild = guild_lock.write();
+        if !guild.members.contains_key(&user) {
+            guild.members.insert(user, new_member);
+        }
+    }
+
+    Ok(())
+}
+
 // Hierarchy access helpers
 pub fn can_member_access_role(guild_id: GuildId, member_id: UserId, role: RoleId) -> Result<bool> {
     let guild = guild_id.to_guild_cached()?;
@@ -190,6 +207,9 @@ pub fn can_member_access_role(guild_id: GuildId, member_id: UserId, role: RoleId
     }
 }
 pub fn can_member_access_member(guild_id: GuildId, from: UserId, to: UserId) -> Result<bool> {
+    ensure_member_exists(guild_id, from)?;
+    ensure_member_exists(guild_id, to)?;
+
     let guild = guild_id.to_guild_cached()?;
     Ok(from == to || guild.read().greater_member_hierarchy(from, to) == Some(from))
 }

@@ -135,16 +135,22 @@ impl PermissionManager {
     pub fn get_user_perms(
         &self, guild_id: GuildId, user: UserId,
     ) -> Result<EnumSet<BotPermission>> {
-        let guild = guild_id.to_guild_cached()?;
-        let guild = guild.read();
+        ensure_member_exists(guild_id, user)?;
+
+        let guild_lock = guild_id.to_guild_cached()?;
+        let guild = guild_lock.read();
 
         let mut guild_perms = self.get_scope(Scope::GuildAllUsers(guild_id))?;
         guild_perms |= self.get_scope(Scope::GuildUser(guild_id, user))?;
+
         if let Some(user) = guild.members.get(&user) {
             for &role in &user.roles {
                 guild_perms |= self.get_scope(Scope::GuildRole(guild_id, role))?;
             }
+        } else {
+            cmd_error!("Could not get user roles!");
         }
+
         if guild_perms.contains(BotPermission::GuildAdmin) || guild.owner_id == user {
             guild_perms = self.get_guild_perms(guild_id)?;
         } else {
