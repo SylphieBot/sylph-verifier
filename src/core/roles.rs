@@ -1,5 +1,6 @@
 use chrono::Utc;
 use core::config::*;
+use core::permissions::*;
 use core::tasks::*;
 use core::verifier::*;
 use database::*;
@@ -52,7 +53,8 @@ pub enum SetRolesStatus {
 }
 
 struct RoleManagerData {
-    config: ConfigManager, database: Database, verifier: Verifier, tasks: TaskManager,
+    config: ConfigManager, database: Database, verifier: Verifier,
+    tasks: TaskManager, permissions: PermissionManager,
     rule_cache: ConcurrentCache<GuildId, Arc<RwLock<VerificationRulesStatus>>>,
     update_cache: ConcurrentCache<GuildId, Arc<ConcurrentCache<(UserId, bool), Option<SystemTime>>>>,
 }
@@ -61,10 +63,11 @@ pub struct RoleManager(Arc<RoleManagerData>);
 impl RoleManager {
     pub fn new(
         config: ConfigManager, database: Database, verifier: Verifier, tasks: TaskManager,
+        permissions: PermissionManager,
     ) -> RoleManager {
         let db_ref_update = database.clone();
         RoleManager(Arc::new(RoleManagerData {
-            config, database, verifier, tasks,
+            config, database, verifier, tasks, permissions,
             rule_cache: ConcurrentCache::new(|_|
                 Ok(Arc::new(RwLock::new(VerificationRulesStatus::NotCompiled)))
             ),
@@ -262,7 +265,10 @@ impl RoleManager {
         let mut member = guild.member(discord_id)?;
         let my_id = serenity::CACHE.read().user.id;
         let can_access_user = util::can_member_access_member(guild, my_id, discord_id)?;
-        let do_set_nickname = self.0.config.get(None, ConfigKeys::SetNickname)?;
+        let do_set_nickname =
+            self.0.config.get(None, ConfigKeys::SetNickname)? &&
+            !self.0.permissions.get_user_perms(guild, discord_id)?
+                .contains(BotPermission::BypassNicknameUpdate);
 
         if can_access_user && do_set_nickname {
             let target_nickname = if let Some(roblox_id) = roblox_id {

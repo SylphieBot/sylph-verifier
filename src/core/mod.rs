@@ -106,7 +106,7 @@ impl VerifierCore {
         let permissions = PermissionManager::new(database.clone());
         let place = PlaceManager::new(place_target)?;
         let roles = RoleManager::new(config.clone(), database.clone(), verifier.clone(),
-                                     tasks.clone());
+                                     tasks.clone(), permissions.clone());
         let discord = DiscordManager::new(config.clone(), core_ref.clone(), roles.clone(),
                                           tasks.clone(), verify_channel.clone(),
                                           delete_service.clone(), permissions.clone());

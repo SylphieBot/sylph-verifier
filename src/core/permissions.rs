@@ -49,6 +49,9 @@ pub enum BotPermission {
 
     // Command permissions
     Unverify, UnverifyOther, Whois, Whowas,
+
+    // Guild permissions 2
+    BypassNicknameUpdate,
 }
 
 use self::BotPermission::*;

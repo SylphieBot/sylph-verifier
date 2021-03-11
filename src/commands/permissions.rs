@@ -31,6 +31,7 @@ config_values! {
     manage_verification    => ManageVerification,
 
     // Guild permissions
+    bypass_nickname_update => BypassNicknameUpdate,
     bypass_hierarchy       => BypassHierarchy,
     manage_server_settings => ManageGuildSettings,
     manage_roles           => ManageRoles,

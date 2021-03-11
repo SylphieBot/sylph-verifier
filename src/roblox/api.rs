@@ -35,9 +35,21 @@ struct RobloxBadgesLookup {
 }
 
 #[derive(Deserialize)]
-struct RobloxGroupLookup {
-    #[serde(rename = "Id")] id: u64,
-    #[serde(rename = "Rank")] rank: u32,
+struct LookupGroup {
+    id: u64,
+}
+#[derive(Deserialize)]
+struct LookupRole {
+    rank: u32,
+}
+#[derive(Deserialize)]
+struct LookupElem {
+    group: LookupGroup,
+    role: LookupRole
+}
+#[derive(Deserialize)]
+struct LookupGroupsData {
+    data: Vec<LookupElem>
 }
 
 crate struct WebProfileInfo {
@@ -137,12 +149,12 @@ crate fn has_player_badge(id: RobloxUserID, asset: u64) -> Result<bool> {
 }
 
 crate fn get_player_groups(id: RobloxUserID) -> Result<HashMap<u64, u32>> {
-    let uri = format!("https://api.roblox.com/users/{}/groups", id.0);
+    let uri = format!("https://groups.roblox.com/v2/users/{}/groups/roles", id.0);
     let json = get_api_endpoint(&uri)?.error_for_status()?.text()?;
-    let groups = serde_json::from_str::<Vec<RobloxGroupLookup>>(&json)?;
+    let groups = serde_json::from_str::<LookupGroupsData>(&json)?;
     let mut map = HashMap::new();
-    for RobloxGroupLookup { id, rank } in groups {
-        map.insert(id, rank);
+    for elem in groups.data {
+        map.insert(elem.group.id, elem.role.rank);
     }
     Ok(map)
 }

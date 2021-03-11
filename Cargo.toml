@@ -6,7 +6,7 @@ build = "build.rs"
 
 [profile.release]
 opt-level = 3
-debug = 2
+debug = 1
 lto = true
 
 [profile.bench]
