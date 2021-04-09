@@ -3,6 +3,7 @@ use parking_lot::{
     Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, MappedRwLockReadGuard, MappedRwLockWriteGuard,
 };
 use reqwest;
+use serenity::CACHE;
 use serenity::model::prelude::*;
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
@@ -11,6 +12,7 @@ use std::mem::drop;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use chrono::{DateTime, Utc};
 
 fn div_ceil(a: u64, b: u64) -> u64 {
     if a == 0 {
@@ -175,7 +177,51 @@ pub fn sprunge(text: &str) -> Result<String> {
     Ok(result.text()?.trim().to_string())
 }
 
+pub fn ensure_guild_exists(guild_id: GuildId) -> Result<()> {
+    let cache = CACHE.read();
+
+    if !cache.guilds.contains_key(&guild_id) {
+        std::mem::drop(cache);
+
+        let partial: PartialGuild = guild_id.to_partial_guild()?;
+        warn!("Guild not sent?");
+        let guild = Guild {
+            afk_channel_id: partial.afk_channel_id,
+            afk_timeout: partial.afk_timeout,
+            application_id: None,
+            channels: partial.channels()?
+                .into_iter()
+                .map(|(k, v)| (k, Arc::new(RwLock::new(v))))
+                .collect(),
+            default_message_notifications: partial.default_message_notifications,
+            emojis: partial.emojis,
+            explicit_content_filter: ExplicitContentFilter::None,
+            features: partial.features,
+            icon: partial.icon,
+            id: partial.id,
+            joined_at: Utc::now().into(),
+            large: true,
+            member_count: 0,
+            members: HashMap::new(),
+            mfa_level: partial.mfa_level,
+            name: partial.name,
+            owner_id: partial.owner_id,
+            presences: HashMap::new(),
+            region: partial.region,
+            roles: partial.roles,
+            splash: partial.splash,
+            system_channel_id: None,
+            verification_level: partial.verification_level,
+            voice_states: HashMap::new(),
+        };
+        CACHE.write().guilds.insert(guild_id, Arc::new(RwLock::new(guild)));
+    }
+
+    Ok(())
+}
 pub fn ensure_member_exists(guild_id: GuildId, user: UserId) -> Result<()> {
+    ensure_guild_exists(guild_id)?;
+
     let guild_lock = guild_id.to_guild_cached()?;
     let guild = guild_lock.read();
 
@@ -194,6 +240,8 @@ pub fn ensure_member_exists(guild_id: GuildId, user: UserId) -> Result<()> {
 
 // Hierarchy access helpers
 pub fn can_member_access_role(guild_id: GuildId, member_id: UserId, role: RoleId) -> Result<bool> {
+    ensure_guild_exists(guild_id)?;
+
     let guild = guild_id.to_guild_cached()?;
     let owner_id = guild.read().owner_id;
 
@@ -207,6 +255,7 @@ pub fn can_member_access_role(guild_id: GuildId, member_id: UserId, role: RoleId
     }
 }
 pub fn can_member_access_member(guild_id: GuildId, from: UserId, to: UserId) -> Result<bool> {
+    ensure_guild_exists(guild_id)?;
     ensure_member_exists(guild_id, from)?;
     ensure_member_exists(guild_id, to)?;
 

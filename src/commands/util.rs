@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::util;
 use regex::Regex;
 
 lazy_static! {
@@ -8,6 +9,7 @@ lazy_static! {
 }
 
 crate fn find_role(guild_id: GuildId, role_name: &str) -> Result<RoleId> {
+    util::ensure_guild_exists(guild_id)?;
     let guild = guild_id.to_guild_cached()?;
     let guild = guild.read();
 

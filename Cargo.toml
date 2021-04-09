@@ -55,7 +55,7 @@ version = "0.8.5"
 [dependencies.serenity]
 version = "0.5.9"
 git = "https://github.com/Lymia/serenity.git"
-rev = "bfc12d24d8b2dbac00edc93f5c4bb1a531b8cc7e"
+rev = "ab7d852d9b1aa91e1b2308529c7a4d3e7a49a3b9"
 default-features = false
 features = ["cache", "client", "model"]
 

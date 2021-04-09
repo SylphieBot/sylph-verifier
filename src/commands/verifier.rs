@@ -357,6 +357,7 @@ crate const COMMANDS: &[Command] = &[
                     });
                 writeln!(config, "• {} = {}", role, definition)?;
                 if let Some(role_id) = role_data.role_id {
+                    util::ensure_guild_exists(guild_id)?;
                     let guild = guild_id.to_guild_cached()?;
                     let guild = guild.read();
                     match guild.roles.get(&role_id) {
