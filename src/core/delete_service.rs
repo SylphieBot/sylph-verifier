@@ -71,7 +71,10 @@ impl DeleteService {
             let mut current_channel_start = 0;
             let mut current_channel_id = ChannelId(0x3ff001); // dummy channel id
             loop {
-                if i == queued.len() || queued[i].0 != current_channel_id {
+                if i == queued.len()
+                    || queued[i].0 != current_channel_id
+                    || (i - current_channel_start) >= 100
+                {
                     let msgs = &queued[current_channel_start..i];
                     if msgs.len() == 1 {
                         let msg = msgs[0].1;
