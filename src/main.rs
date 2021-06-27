@@ -1,6 +1,6 @@
 #![warn(unused_extern_crates)]
 #![recursion_limit="128"]
-#![feature(crate_visibility_modifier, box_patterns, const_fn, const_fn_fn_ptr_basics, try_trait)]
+#![feature(crate_visibility_modifier, box_patterns, const_fn_fn_ptr_basics, try_trait)]
 #![deny(unused_must_use)]
 
 // TODO: Pass around IDs less to touch Serenity's cache less.
