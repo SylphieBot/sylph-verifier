@@ -75,7 +75,7 @@ impl VerificationChannelManager {
             }
             channel_id.delete_messages(messages)?;
             tries += 1;
-            cmd_ensure!(tries < 5, "Could not delete all messages in 5 tries.");
+            cmd_ensure!(tries < 100, "Could not delete all messages in 100 tries.");
         }
         Ok(())
     }

@@ -99,7 +99,7 @@ impl DeleteService {
         if cutoff > msg.timestamp.into() {
             let channel_id = msg.channel_id;
             let id = msg.id;
-            check_delete_result(id, channel_id.delete_message(id));
+            check_delete_result(id, channel_id.delete_message(id)).ok();
         } else {
             self.0.queued_deletes.lock().push(DeleteRequest(msg.channel_id, msg.id));
             let delete_service = self.clone();
