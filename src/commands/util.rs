@@ -10,11 +10,11 @@ lazy_static! {
 
 crate fn find_role(guild_id: GuildId, role_name: &str) -> Result<RoleId> {
     util::ensure_guild_exists(guild_id)?;
-    let guild = guild_id.to_guild_cached()?;
+    let guild = guild_id.to_guild_cached().ok_or_else(Error::none)?;
     let guild = guild.read();
 
     if let Some(captures) = MENTION_REGEX.captures(role_name) {
-        let role_id_str = captures.get(1)?.as_str();
+        let role_id_str = captures.get(1).ok_or_else(Error::none)?.as_str();
         let role_id = RoleId(role_id_str.parse().to_cmd_err(|| "Role ID too large.")?);
         cmd_ensure!(guild.roles.contains_key(&role_id),
                     "That role does not exist in this server.");
@@ -39,7 +39,7 @@ crate fn find_role(guild_id: GuildId, role_name: &str) -> Result<RoleId> {
 
 crate fn find_user(user_name: &str) -> Result<Option<UserId>> {
     if let Some(captures) = MENTION_REGEX.captures(user_name) {
-        let user_id_str = captures.get(1)?.as_str();
+        let user_id_str = captures.get(1).ok_or_else(Error::none)?.as_str();
         Ok(Some(UserId(user_id_str.parse().to_cmd_err(|| "User ID too large.")?)))
     } else if SNOWFLAKE_REGEX.is_match(user_name) {
         Ok(Some(UserId(user_name.parse().to_cmd_err(|| "User ID too large.")?)))

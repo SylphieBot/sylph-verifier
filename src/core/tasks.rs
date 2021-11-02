@@ -41,8 +41,7 @@ impl TaskManager {
         };
         let tasks = TaskManager(Arc::new(TaskManagerData {
             core_ref,
-            pool: Mutex::new(ThreadPool::with_name("task thread".to_string(),
-                                                   max(num_cpus::get() * 4, 16))),
+            pool: Mutex::new(ThreadPool::with_name("task thread".to_string(), 40)),
             timer_ring: Mutex::new(TimerRing { slots, cur_pos: 0, }),
         }));
         {

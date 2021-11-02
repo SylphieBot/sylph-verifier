@@ -222,7 +222,7 @@ pub fn ensure_guild_exists(guild_id: GuildId) -> Result<()> {
 pub fn ensure_member_exists(guild_id: GuildId, user: UserId) -> Result<()> {
     ensure_guild_exists(guild_id)?;
 
-    let guild_lock = guild_id.to_guild_cached()?;
+    let guild_lock = guild_id.to_guild_cached().ok_or_else(Error::none)?;
     let guild = guild_lock.read();
 
     if !guild.members.contains_key(&user) {
@@ -242,14 +242,15 @@ pub fn ensure_member_exists(guild_id: GuildId, user: UserId) -> Result<()> {
 pub fn can_member_access_role(guild_id: GuildId, member_id: UserId, role: RoleId) -> Result<bool> {
     ensure_guild_exists(guild_id)?;
 
-    let guild = guild_id.to_guild_cached()?;
+    let guild = guild_id.to_guild_cached().ok_or_else(Error::none)?;
     let owner_id = guild.read().owner_id;
 
     if member_id == owner_id {
         Ok(true)
     } else {
         match guild.read().member(member_id)?.highest_role_info() {
-            Some((_, position)) => Ok(role.to_role_cached()?.position < position),
+            Some((_, position)) =>
+                Ok(role.to_role_cached().ok_or_else(Error::none)?.position < position),
             None => Ok(false),
         }
     }
@@ -259,6 +260,6 @@ pub fn can_member_access_member(guild_id: GuildId, from: UserId, to: UserId) -> 
     ensure_member_exists(guild_id, from)?;
     ensure_member_exists(guild_id, to)?;
 
-    let guild = guild_id.to_guild_cached()?;
+    let guild = guild_id.to_guild_cached().ok_or_else(Error::none)?;
     Ok(from == to || guild.read().greater_member_hierarchy(from, to) == Some(from))
 }

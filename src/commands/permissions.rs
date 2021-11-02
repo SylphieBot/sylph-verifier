@@ -131,7 +131,7 @@ crate const COMMANDS: &[Command] = &[
         .required_permissions(enum_set!(BotPermission::BotAdmin))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg|
-            set_perms_for_scope(ctx, Scope::Guild(msg.guild_id?), 0)
+            set_perms_for_scope(ctx, Scope::Guild(msg.guild_id.ok_or_else(Error::none)?), 0)
         ),
     Command::new("set_perms")
         .help(Some("<all_users|role <role id or name>|user <user id or mention>> \
@@ -140,7 +140,7 @@ crate const COMMANDS: &[Command] = &[
         .required_permissions(enum_set!(BotPermission::GuildAdmin))
         .allowed_contexts(enum_set!(CommandTarget::ServerMessage))
         .exec_discord(|ctx, _, msg| set_perms(ctx, |scope, args| {
-            let guild_id = msg.guild_id?;
+            let guild_id = msg.guild_id.ok_or_else(Error::none)?;
             match scope {
                 "all_users" => Ok(Scope::GuildAllUsers(guild_id)),
                 "role" => Ok(Scope::GuildRole(guild_id, find_role(guild_id, args)?)),

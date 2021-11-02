@@ -223,7 +223,7 @@ impl <'a> CommandContext<'a> {
     fn get_guild(&self) -> Result<Option<GuildId>> {
         match self.data.discord_context() {
             Some((_, message)) =>
-                match message.channel()? {
+                match message.channel().ok_or_else(Error::none)? {
                     Channel::Guild(ch) => Ok(Some(ch.read().guild_id)),
                     Channel::Group(_) | Channel::Private(_) | Channel::Category(_) => Ok(None),
                 },

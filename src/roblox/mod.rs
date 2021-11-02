@@ -1,3 +1,5 @@
+use errors::*;
+
 mod api;
 mod lz4;
 mod place;
@@ -21,6 +23,6 @@ impl RobloxUserID {
     }
 
     pub fn lookup_username(&self) -> ::errors::Result<String> {
-        Ok(self.lookup_username_opt()??)
+        Ok(self.lookup_username_opt()?.ok_or_else(Error::none)?)
     }
 }

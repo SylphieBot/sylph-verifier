@@ -173,7 +173,7 @@ fn map_string_properties(
                 let prop = parse_string_property(entry.data.decompress()?.as_ref())?;
                 if let Some(prop) = prop {
                     if prop.prop_name == "Name" {
-                        let type_name = types.remove(&prop.type_id)?;
+                        let type_name = types.remove(&prop.type_id).ok_or_else(Error::none)?;
                         type_names.insert(prop.type_id, (type_name, Some(prop.prop_values)));
                     } else {
                         map_targets.push((prop.type_id, prop.prop_name, prop.prop_values, entry));
@@ -187,7 +187,7 @@ fn map_string_properties(
     }
     for (type_id, prop_name, mut prop_values, entry_target) in map_targets {
         let mut modified = false;
-        let type_data = type_names.get(&type_id)?;
+        let type_data = type_names.get(&type_id).ok_or_else(Error::none)?;
         if let Some(ref names) = type_data.1 {
             for (value, name) in prop_values.iter_mut().zip(names.iter()) {
                 if let Some(new_value) = f(&type_data.0, name, &prop_name, value)? {

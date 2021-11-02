@@ -6,7 +6,6 @@ use serenity::prelude::*;
 use std::borrow::Cow;
 use std::error::{Error as StdError};
 use std::fmt;
-use std::option::NoneError;
 
 pub use failure::{Fail, ResultExt};
 pub use hyper::status::StatusCode;
@@ -46,6 +45,11 @@ pub enum ErrorKind {
 }
 
 pub struct Error(pub Box<(ErrorKind, Option<Backtrace>)>);
+impl Error {
+    pub fn none() -> Self {
+        Error::from(ErrorKind::SomeExpected)
+    }
+}
 impl Fail for Error {
     fn cause(&self) -> Option<&dyn Fail> {
         (*self.0).0.cause()
@@ -111,11 +115,6 @@ impl From<SerenityError> for Error {
             }
             err => ErrorKind::StdError(StdErrorWrapper(Mutex::new(Box::new(err)))),
         }.into()
-    }
-}
-impl From<NoneError> for Error {
-    fn from(_: NoneError) -> Self {
-        ErrorKind::SomeExpected.into()
     }
 }
 

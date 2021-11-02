@@ -140,7 +140,7 @@ impl PermissionManager {
     ) -> Result<EnumSet<BotPermission>> {
         ensure_member_exists(guild_id, user)?;
 
-        let guild_lock = guild_id.to_guild_cached()?;
+        let guild_lock = guild_id.to_guild_cached().ok_or_else(Error::none)?;
         let guild = guild_lock.read();
 
         let mut guild_perms = self.get_scope(Scope::GuildAllUsers(guild_id))?;

@@ -158,7 +158,7 @@ impl TokenContext {
             "INSERT INTO verification_keys (key, time_increment, version) VALUES (?1, ?2, ?3)",
             (key, time_increment, TOKEN_VERSION)
         )?;
-        Ok(TokenContext::from_db_internal(conn)??)
+        Ok(TokenContext::from_db_internal(conn)?.ok_or_else(Error::none)?)
     }
     fn rekey(conn: &DatabaseConnection, time_increment: u32) -> Result<TokenContext> {
         info!("Regenerating token key due to user request.");
