@@ -280,7 +280,7 @@ pub struct Database {
 impl Database {
     pub fn new(path: impl AsRef<Path>) -> Result<Database> {
         let pool = Arc::new(Pool::builder()
-            .max_size(15)
+            .max_size(40)
             .idle_timeout(Some(time::Duration::from_secs(60 * 5)))
             .build(ConnectionManager::new(path.as_ref())?)?);
         let database = Database { pool };
